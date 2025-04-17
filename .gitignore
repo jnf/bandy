@@ -3,4 +3,4 @@
 .notes
 bandy.db
 *.pstore
-*.logs
+*.log
