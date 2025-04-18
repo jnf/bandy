@@ -4,7 +4,7 @@ module API
     attr_reader :older_than_token, :fan_id
     attr_accessor :count
 
-    def initialize(count: 100, starting_token: nil, fan_id: nil, debug: false)
+    def initialize(count: 50, starting_token: nil, fan_id: nil, debug: false)
       # tomorrow, tomorrow... need a token, for tomorrow
       @older_than_token = starting_token || "#{(Time.now.to_i + 86_400)}:0:a::"
       @fan_id = fan_id || fetch_fan_id
