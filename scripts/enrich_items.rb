@@ -1,11 +1,12 @@
 class EnrichItems
-  attr_reader :store, :log, :fan_id, :debug
+  attr_reader :store, :log, :fan_id, :debug, :known_preorders
 
   def initialize(debug: false)
     @debug = debug
     @store = PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/enrich_items.log', 'monthly')
     @fan_id = store.transaction { store.fetch(:fan_id, nil) }
+    @known_preorders = store.transaction { store.fetch(:items, {}).select { |k, i| i[:state] == :preorder } }.keys
   end
 
   def run
@@ -31,7 +32,7 @@ class EnrichItems
 
   def fetch_items(fetcher)
     items = store.transaction { store.fetch(:items, {} ) }
-    while items.any? { |ik, i| i[:state] == :seen }
+    while items.any? { |ik, i| i[:state] == :seen } || known_preorders.any?
       happy, deets = fetcher.fetch
       raise deets unless happy
       items = update_store(deets)
@@ -46,10 +47,10 @@ class EnrichItems
         sale_key = item["sale_item_type"] + item["sale_item_id"].to_s
         record = store[:items][tralbum_key]
         if record
-          next unless record[:state] == :seen
+          next unless record[:state] == :seen  || record[:state] == :preorder
+          next if item["is_preorder"] && known_preorders.reject! { |kp| kp == tralbum_key }
           record.merge!({
             token: item["token"],
-            is_preorder: item["is_preorder"],
             redownload_url: deets["redownload_urls"][sale_key],
             state: item["is_preorder"] ? :preorder : :ready,
           })
