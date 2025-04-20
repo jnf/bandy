@@ -15,7 +15,7 @@ require_relative './api/baseapi.rb'
 Dir[File.join(__dir__, 'scripts', '*.rb')].each { |file| require file }
 
 # add any new collection items to the db
-CollectionSync.new(debug: true).run
+SyncCollection.new(debug: true).run
 
 # enrich any 'seen' items
 EnrichItems.new(debug: true).run

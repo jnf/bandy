@@ -1,4 +1,4 @@
-class CollectionSync
+class SyncCollection
   attr_reader :log, :store, :debug
 
   def initialize(debug: false)
