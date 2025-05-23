@@ -1,3 +1,5 @@
+#!/usr/bin/env ruby
+
 # dependencies
 require 'dotenv/load'
 require 'date'
