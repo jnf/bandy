@@ -1,7 +1,7 @@
 class EnrichItems
   attr_reader :store, :log, :fan_id, :debug, :known_preorders
 
-  def initialize(debug: false)
+  def initialize(debug: DEBUG)
     @debug = debug
     @store = PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/enrich_items.log', 'monthly')
