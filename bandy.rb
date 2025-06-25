@@ -7,8 +7,8 @@ require 'logger'
 require 'httparty'
 require 'nokogiri'
 require 'json'
+require 'tempfile'
 require 'pstore' # https://ruby-doc.org/3.4.1/stdlibs/pstore/PStore.html
-require 'pry'
 
 DEBUG = true
 
