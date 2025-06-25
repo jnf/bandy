@@ -25,7 +25,7 @@ SyncCollection.new.run
 EnrichItems.new.run
 
 # check for new downloadables 
-# DownloadItems.new.run
+DownloadItems.new.run
 # could be either new collection items or pre-releases being released
 
 # download new downloadables
