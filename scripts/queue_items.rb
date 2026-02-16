@@ -5,7 +5,7 @@ class QueueItems
     @debug = debug
     @store = PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/queue_items.log', 'monthly')
-    @format = ENV['FORMAT']
+    @format = ENV.fetch('FORMAT', 'mp3-320')
     @queue_limit = ENV.fetch('QUEUE_LIMIT', '25').to_i
   end
 
@@ -73,7 +73,7 @@ class QueueItems
 
   def to_cdn(url)
     munged = url.gsub(/\/download/, '/statdownload') + '&.vrs=1'
-    res = HTTParty.get(munged, headers: { 'accept' => 'application/json', "Cookie" => "identity=#{ENV['IDENT']}" })
+    res = HTTParty.get(munged, headers: { 'accept' => 'application/json', "Cookie" => "identity=#{ENV.fetch('IDENT')}" })
     raise StandardError.new res["errortype"] if res["result"] == "err"
     res
   end

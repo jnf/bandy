@@ -5,8 +5,8 @@ class DownloadItems
     @debug = debug
     @store = PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/download_items.log', 'monthly')
-    @format = ENV['FORMAT']
-    @download_path = ENV['DOWNLOAD_PATH']
+    @format = ENV.fetch('FORMAT', 'mp3-320')
+    @download_path = ENV.fetch('DOWNLOAD_PATH', './downloads')
     @freshness_threshold = ENV.fetch('CDN_FRESHNESS_THRESHOLD', '300').to_i
     @max_requeue_attempts = ENV.fetch('MAX_REQUEUE_ATTEMPTS', '3').to_i
   end
