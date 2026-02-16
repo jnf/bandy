@@ -1,13 +1,14 @@
 require 'zip'  # rubyzip gem
 
 class UnpackItems
-  attr_reader :debug, :store, :log, :unpack_path
+  attr_reader :debug, :store, :log, :unpack_path, :delete_after_unpack
 
   def initialize(debug: DEBUG)
     @debug = debug
     @store = PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/unpack_items.log', 'monthly')
     @unpack_path = ENV.fetch('UNPACK_PATH', './collection')
+    @delete_after_unpack = ENV.fetch('DELETE_AFTER_UNPACK', 'false') == 'true'
   end
 
   def run
@@ -56,6 +57,12 @@ class UnpackItems
           end
 
           log.info("Unpacked #{item_key} to #{extract_dir}")
+
+          # Optionally delete archive after successful unpacking
+          if delete_after_unpack
+            File.delete(zip_path) if File.exist?(zip_path)
+            log.info("Deleted archive #{zip_path}")
+          end
 
           store[:items][item_key].merge!({
             state: :unpacked,
