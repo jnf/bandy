@@ -18,16 +18,20 @@ require_relative './api/baseapi.rb'
 # core scripts
 Dir[File.join(__dir__, 'scripts', '*.rb')].each { |file| require file }
 
-# add any new collection items to the db
+# State machine pipeline:
+# :seen → :preorder/:ready → :queued → :downloaded → :unpacked
+
+# add any new collection items to the db (:seen)
 SyncCollection.new.run
 
-# enrich any 'seen' items
+# enrich 'seen' items with metadata (:seen → :ready or :preorder)
 EnrichItems.new.run
 
-# check for new downloadables 
+# queue ready items for download (:ready → :queued, batch limited)
+QueueItems.new.run
+
+# download queued items (:queued → :downloaded, with freshness check)
 DownloadItems.new.run
-# could be either new collection items or pre-releases being released
 
-# download new downloadables
-
-# unpack new unpackables
+# unpack downloaded items (:downloaded → :unpacked)
+UnpackItems.new.run
