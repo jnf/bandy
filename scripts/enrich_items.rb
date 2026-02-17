@@ -1,15 +1,17 @@
 class EnrichItems
   attr_reader :store, :log, :fan_id, :debug, :known_preorders
 
-  def initialize(debug: DEBUG, store: nil)
+  def initialize(debug: DEBUG, store: nil, hidden_items_api: nil, collection_items_api: nil)
     @debug = debug
     @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/enrich_items.log', 'monthly')
-    @fan_id = store.transaction { store.fetch(:fan_id, nil) }
-    @known_preorders = store.transaction { store.fetch(:items, {}).select { |k, i| i[:state] == :preorder } }.keys
+    @hidden_items_api = hidden_items_api
+    @collection_items_api = collection_items_api
   end
 
   def run
+    @fan_id = store.transaction { store.fetch(:fan_id, nil) }
+    @known_preorders = store.transaction { store.fetch(:items, {}).select { |k, i| i[:state] == :preorder } }.keys
     enrich_hidden_items
     enrich_collection_items
   rescue StandardError => e
@@ -19,12 +21,12 @@ class EnrichItems
   end
 
   def enrich_hidden_items
-    hi = API::HiddenItems.new(fan_id: fan_id, debug: debug)
+    hi = @hidden_items_api || API::HiddenItems.new(fan_id: fan_id, debug: debug)
     fetch_items(hi)
   end
 
   def enrich_collection_items
-    ci = API::CollectionItems.new(fan_id: fan_id, debug: debug)
+    ci = @collection_items_api || API::CollectionItems.new(fan_id: fan_id, debug: debug)
     fetch_items(ci)
   end
 
