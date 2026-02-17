@@ -3,6 +3,6 @@
 .notes
 bandy.db
 *.pstore
-*.log
+*.log*
 downloads
 collection
