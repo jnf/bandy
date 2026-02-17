@@ -1,9 +1,9 @@
 class DownloadItems
   attr_reader :debug, :store, :log, :format, :download_path, :freshness_threshold, :max_requeue_attempts
 
-  def initialize(debug: DEBUG)
+  def initialize(debug: DEBUG, store: nil)
     @debug = debug
-    @store = PStore.new('./store/collection_items.pstore')
+    @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/download_items.log', 'monthly')
     @format = ENV.fetch('FORMAT', 'mp3-320')
     @download_path = ENV.fetch('DOWNLOAD_PATH', './downloads')

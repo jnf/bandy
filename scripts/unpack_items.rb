@@ -3,9 +3,9 @@ require 'zip'  # rubyzip gem
 class UnpackItems
   attr_reader :debug, :store, :log, :unpack_path, :delete_after_unpack
 
-  def initialize(debug: DEBUG)
+  def initialize(debug: DEBUG, store: nil)
     @debug = debug
-    @store = PStore.new('./store/collection_items.pstore')
+    @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/unpack_items.log', 'monthly')
     @unpack_path = ENV.fetch('UNPACK_PATH', './collection')
     @delete_after_unpack = ENV.fetch('DELETE_AFTER_UNPACK', 'false') == 'true'

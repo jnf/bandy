@@ -1,9 +1,9 @@
 class EnrichItems
   attr_reader :store, :log, :fan_id, :debug, :known_preorders
 
-  def initialize(debug: DEBUG)
+  def initialize(debug: DEBUG, store: nil)
     @debug = debug
-    @store = PStore.new('./store/collection_items.pstore')
+    @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/enrich_items.log', 'monthly')
     @fan_id = store.transaction { store.fetch(:fan_id, nil) }
     @known_preorders = store.transaction { store.fetch(:items, {}).select { |k, i| i[:state] == :preorder } }.keys

@@ -1,10 +1,10 @@
 class SyncCollection
   attr_reader :log, :store, :debug
 
-  def initialize(debug: DEBUG)
+  def initialize(debug: DEBUG, store: nil)
     @debug = debug
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/collection_sync.log', 'monthly')
-    @store = PStore.new('./store/collection_items.pstore')
+    @store = store || PStore.new('./store/collection_items.pstore')
   end
 
   def run
