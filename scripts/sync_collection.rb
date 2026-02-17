@@ -1,15 +1,16 @@
 class SyncCollection
   attr_reader :log, :store, :debug
 
-  def initialize(debug: DEBUG, store: nil)
+  def initialize(debug: DEBUG, store: nil, collection_summary_api: nil)
     @debug = debug
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/collection_sync.log', 'monthly')
     @store = store || PStore.new('./store/collection_items.pstore')
+    @collection_summary_api = collection_summary_api
   end
 
   def run
     log.info("Starting Collection Sync")
-    cs = API::CollectionSummary.new(debug: debug)
+    cs = @collection_summary_api || API::CollectionSummary.new(debug: debug)
     happy, deets = cs.fetch
     raise deets unless happy # will eventually need real error handling
     sync_items = deets["collection_summary"]["tralbum_lookup"]
