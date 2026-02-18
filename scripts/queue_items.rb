@@ -1,17 +1,17 @@
 class QueueItems
-  attr_reader :debug, :store, :log, :format, :queue_limit
+  attr_reader :debug, :store, :log, :format, :queue_limit, :resolver
 
-  def initialize(debug: DEBUG, store: nil)
+  def initialize(debug: DEBUG, store: nil, resolver: nil)
     @debug = debug
     @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/queue_items.log', 'monthly')
     @format = ENV.fetch('FORMAT', 'mp3-320')
     @queue_limit = ENV.fetch('QUEUE_LIMIT', '25').to_i
+    @resolver = resolver || QueueResolver.new(format: format, debug: debug)
   end
 
   def run
     log.info("Starting Queue Items")
-    pd = API::PageData.new(debug: debug)
 
     ready_items = store.transaction do
       store.fetch(:items, {}).select { |k, i| i[:state] == :ready }.first(queue_limit)
@@ -23,22 +23,14 @@ class QueueItems
       store.transaction do
         log.info("Queuing #{item_key}")
 
-        # Fetch PageData to get digital_items
-        pd.path = item[:redownload_url]
-        happy, deets = pd.fetch
-        raise deets unless happy
-
-        digital_item = deets["digital_items"][0]
-
-        # Convert to CDN URL
         begin
-          cdn_resp = to_cdn(digital_item["downloads"][format]["url"])
+          result = resolver.resolve(item[:redownload_url])
 
           # Store CDN URL with timestamp
           store[:items][item_key].merge!({
-            cdn_url: cdn_resp["download_url"],
+            cdn_url: result[:cdn_url],
             queued_at: Time.now.to_i,
-            digital_item: digital_item,
+            digital_item: result[:digital_item],
             state: :queued
           })
 
@@ -67,6 +59,26 @@ class QueueItems
     log.fatal("Queue Items failed with error: #{e}")
     e.backtrace.each { |m| log.fatal(m) }
     exit(1)
+  end
+end
+
+class QueueResolver
+  attr_reader :format, :pd
+
+  def initialize(format:, debug:)
+    @format = format
+    @pd = API::PageData.new(debug: debug)
+  end
+
+  def resolve(redownload_url)
+    pd.path = redownload_url
+    happy, deets = pd.fetch
+    raise deets unless happy
+
+    digital_item = deets["digital_items"][0]
+    cdn_resp = to_cdn(digital_item["downloads"][format]["url"])
+
+    { digital_item: digital_item, cdn_url: cdn_resp["download_url"] }
   end
 
   private
