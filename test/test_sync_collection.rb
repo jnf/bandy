@@ -38,7 +38,7 @@ class TestSyncCollection < Minitest::Test
   end
 
   def stored_fan_id
-    @store.transaction { @store.fetch(:fan_id, nil) }
+    @store.transaction { @store.fetch(:config, {})[:fan_id] }
   end
 
   # --- Tests ---

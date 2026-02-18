@@ -10,7 +10,7 @@ class EnrichItems
   end
 
   def run
-    @fan_id = store.transaction { store.fetch(:fan_id, nil) }
+    @fan_id = store.transaction { store.fetch(:config, {})[:fan_id] }
     @known_preorders = store.transaction { store.fetch(:items, {}).select { |k, i| i[:state] == :preorder } }.keys
     enrich_hidden_items
     enrich_collection_items

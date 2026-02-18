@@ -22,7 +22,7 @@ class TestEnrichItems < Minitest::Test
   def seed_store(items, fan_id: "42")
     @store.transaction do
       @store[:items] = items
-      @store[:fan_id] = fan_id
+      @store[:config] = { fan_id: fan_id }
     end
   end
 

@@ -17,7 +17,8 @@ class SyncCollection
     sync_items.select! { |k, v| v["purchased"] } # items w/o a purchased date are wishlist
     log.info("Found #{sync_items.count} items in remote collection for fan #{deets["fan_id"]}.")
     store.transaction do
-      store[:fan_id] = deets["fan_id"] # we'll need this to enrich the found items later
+      config = store.fetch(:config, {})
+      store[:config] = config.merge(fan_id: deets["fan_id"])
       store_items = store.fetch(:items, {})
       new_keys = sync_items.keys - store_items.keys # these are the tralbums we've added since last run
       log.info("#{new_keys.count} new items for local collection.")
