@@ -1,7 +1,7 @@
 class DownloadItems
-  attr_reader :debug, :store, :log, :format, :download_path, :freshness_threshold, :max_requeue_attempts
+  attr_reader :debug, :store, :log, :format, :download_path, :freshness_threshold, :max_requeue_attempts, :downloader
 
-  def initialize(debug: DEBUG, store: nil)
+  def initialize(debug: DEBUG, store: nil, downloader: nil)
     @debug = debug
     @store = store || PStore.new('./store/collection_items.pstore')
     @log = debug ? Logger.new($stdout) : Logger.new('./logs/download_items.log', 'monthly')
@@ -9,6 +9,7 @@ class DownloadItems
     @download_path = ENV.fetch('DOWNLOAD_PATH', './downloads')
     @freshness_threshold = ENV.fetch('CDN_FRESHNESS_THRESHOLD', '300').to_i
     @max_requeue_attempts = ENV.fetch('MAX_REQUEUE_ATTEMPTS', '3').to_i
+    @downloader = downloader || Downloader.new(download_path: download_path, log: log)
   end
 
   def run
@@ -51,7 +52,7 @@ class DownloadItems
         # Download from CDN URL
         begin
           log.info("Downloading #{item_key} from CDN (age: #{age}s)")
-          local_path = download_file(item_key, item[:cdn_url], item[:digital_item])
+          local_path = downloader.call(item_key, item[:cdn_url], item[:digital_item])
 
           store[:items][item_key].merge!({
             state: :downloaded,
@@ -74,10 +75,17 @@ class DownloadItems
     e.backtrace.each { |m| log.fatal(m) }
     exit(1)
   end
+end
 
-  private
+class Downloader
+  attr_reader :download_path, :log
 
-  def download_file(item_key, cdn_url, digital_item)
+  def initialize(download_path:, log:)
+    @download_path = download_path
+    @log = log
+  end
+
+  def call(item_key, cdn_url, digital_item)
     temp = Tempfile.new(binmode: true)
     log.info("temp name is #{File.basename(temp)}")
 
