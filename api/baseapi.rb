@@ -2,11 +2,12 @@ module API
   class BaseAPI
     include HTTParty
     base_uri 'https://bandcamp.com'
-    attr_reader :log
+    attr_reader :log, :http_client
     @@suffix_paths = Hash.new('')
 
-    def initialize(debug: false)
+    def initialize(debug: false, http_client: nil)
       @log = debug ? ::Logger.new($stdout) : ::Logger.new("./logs/#{self.class.name}.log", 'monthly')
+      @http_client = http_client || self.class
       super()
     end
 
@@ -26,13 +27,13 @@ module API
 
     def get
       log.info("BaseAPI: Get #{@@suffix_paths[self.class.name]}")
-      self.class.get(@@suffix_paths[self.class.name], default_opts)
+      http_client.get(@@suffix_paths[self.class.name], default_opts)
     end
 
     def post(body)
       log.info("BaseAPI: Post #{@@suffix_paths[self.class.name]}")
       log.info("BaseAPI: Post body: #{body}")
-      self.class.post(@@suffix_paths[self.class.name], default_opts.merge({body:}))
+      http_client.post(@@suffix_paths[self.class.name], default_opts.merge({body:}))
     end
   end
 end

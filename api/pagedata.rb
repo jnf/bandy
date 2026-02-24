@@ -5,9 +5,9 @@ module API
   class PageData < BaseAPI
     attr_accessor :path
 
-    def initialize(path: nil, debug: false)
+    def initialize(path: nil, debug: false, http_client: nil)
       @path = path
-      super(debug: debug)
+      super(debug: debug, http_client: http_client)
     end
 
     def fetch
@@ -21,7 +21,7 @@ module API
     private
     def get
       log.info("API::PageData: Get #{path}")
-      self.class.get(path, default_opts)
+      http_client.get(path, default_opts)
     end
   end
 end
