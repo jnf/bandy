@@ -10,7 +10,7 @@ require 'json'
 require 'tempfile'
 require 'pstore' # https://ruby-doc.org/3.4.1/stdlibs/pstore/PStore.html
 
-DEBUG = true
+DEBUG = ENV.fetch('DEBUG', 'false') == 'true'
 
 # api classes
 require_relative './api/baseapi.rb'

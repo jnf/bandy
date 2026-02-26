@@ -37,6 +37,7 @@ QUEUE_LIMIT='25'
 CDN_FRESHNESS_THRESHOLD='300'
 MAX_REQUEUE_ATTEMPTS='3'
 DELETE_AFTER_UNPACK='true'
+DEBUG='false'
 ```
 
 ### Getting your `IDENT` cookie
@@ -70,6 +71,7 @@ To run on a schedule, add a cron entry:
 | `CDN_FRESHNESS_THRESHOLD` | `300` | Seconds before a CDN URL is considered stale |
 | `MAX_REQUEUE_ATTEMPTS` | `3` | Times to retry a stale CDN URL before marking `:failed` |
 | `DELETE_AFTER_UNPACK` | `true` | Delete zip archives after successful extraction |
+| `DEBUG` | `false` | Set to `true` to route logs to stdout instead of log files |
 
 ## Project structure
 
