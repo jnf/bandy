@@ -50,7 +50,7 @@ class UnpackItems
         begin
           Zip::File.open(zip_path) do |zip_file|
             zip_file.each do |entry|
-              dest_path = File.join(extract_dir, entry.name)
+              dest_path = File.join(extract_dir, entry.name.force_encoding('utf-8'))
               FileUtils.mkdir_p(File.dirname(dest_path))
               entry.extract(dest_path) unless File.exist?(dest_path)
             end
