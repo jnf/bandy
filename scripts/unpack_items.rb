@@ -30,7 +30,9 @@ class UnpackItems
         end
 
         zip_path = item[:local_path]
-        extract_dir = File.join(unpack_path, item[:band_name], item[:album_title])
+        artist = item[:digital_item]["artist"]
+        title = item[:digital_item]["title"]
+        extract_dir = File.join(unpack_path, artist, title)
 
         # Skip if already extracted
         if Dir.exist?(extract_dir) && !Dir.empty?(extract_dir)
