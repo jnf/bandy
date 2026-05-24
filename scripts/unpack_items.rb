@@ -45,41 +45,46 @@ class UnpackItems
           next
         end
 
-        # Extract zip file
-        log.info("Unpacking #{item_key} from #{zip_path}")
         FileUtils.mkdir_p(extract_dir)
-
-        begin
-          Zip::File.open(zip_path) do |zip_file|
-            zip_file.each do |entry|
-              dest_path = File.join(extract_dir, entry.name.force_encoding('utf-8'))
-              FileUtils.mkdir_p(File.dirname(dest_path))
-              entry.extract(dest_path) unless File.exist?(dest_path)
+        if item[:digital_item]["download_type"] == 't' # tracks don't get unpacked, they get moved
+          ext = item[:local_path].split('.').last
+          dest_file = File.join(extract_dir,"#{title}.#{ext}")
+          log.info("#{item_key} is a track; copying to #{dest_file}")
+          FileUtils.cp(item[:local_path], dest_file)
+        else # Extract zip file
+          begin
+            log.info("Unpacking #{item_key} from #{zip_path}")
+            Zip::File.open(zip_path) do |zip_file|
+              zip_file.each do |entry|
+                dest_path = File.join(extract_dir, entry.name.force_encoding('utf-8'))
+                FileUtils.mkdir_p(File.dirname(dest_path))
+                entry.extract(dest_path) unless File.exist?(dest_path)
+              end
             end
-          end
 
-          log.info("Unpacked #{item_key} to #{extract_dir}")
+            log.info("Unpacked #{item_key} to #{extract_dir}")
 
-          # Optionally delete archive after successful unpacking
-          if delete_after_unpack
-            File.delete(zip_path) if File.exist?(zip_path)
-            log.info("Deleted archive #{zip_path}")
-          end
+            # Optionally delete archive after successful unpacking
+            if delete_after_unpack
+              File.delete(zip_path) if File.exist?(zip_path)
+              log.info("Deleted archive #{zip_path}")
+            end
 
-          store[:items][item_key].merge!({
-            state: :unpacked,
-            unpacked_path: extract_dir,
-            unpacked_at: Time.now.to_i
-          })
-        rescue StandardError => e
-          # Handle corrupted/incomplete zip files
-          if e.message.include?("Zip end of central directory signature not found")
-            log.warn("#{item_key} has corrupted zip file, deleting and resetting to :ready for re-download")
-            File.delete(zip_path) if File.exist?(zip_path)
-            store[:items][item_key][:state] = :ready
-          else
-            log.error("Unpack failed for #{item_key}: #{e.message}")
-            # Leave in :downloaded state to retry next execution
+            store[:items][item_key].merge!({
+              state: :unpacked,
+              unpacked_path: extract_dir,
+              unpacked_at: Time.now.to_i
+            })
+          rescue StandardError => e
+            # Handle corrupted/incomplete zip files
+            if e.message.include?("Zip end of central directory signature not found")
+              log.warn("#{item_key} has corrupted zip file, deleting and resetting to :ready for re-download")
+              File.delete(zip_path) if File.exist?(zip_path)
+              store[:items][item_key][:state] = :ready
+            else
+              log.error("Unpack failed for #{item_key}: #{e.message}")
+              # Leave in :downloaded state to retry next execution
+            end
           end
         end
       end
