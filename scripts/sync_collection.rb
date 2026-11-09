@@ -34,6 +34,6 @@ class SyncCollection
   rescue StandardError => e
     log.error("Collection Sync died with error: #{e}")
     e.backtrace.each { |m| log.fatal(m) }
-    exit(1)
+    raise
   end
 end

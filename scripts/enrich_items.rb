@@ -17,7 +17,7 @@ class EnrichItems
   rescue StandardError => e
     log.fatal("Item Enrichment failed with error: #{e}")
     e.backtrace.each { |m| log.fatal(m) }
-    exit(1)
+    raise
   end
 
   def enrich_hidden_items

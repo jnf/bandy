@@ -58,7 +58,7 @@ class QueueItems
   rescue StandardError => e
     log.fatal("Queue Items failed with error: #{e}")
     e.backtrace.each { |m| log.fatal(m) }
-    exit(1)
+    raise
   end
 end
 

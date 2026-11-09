@@ -94,6 +94,6 @@ class UnpackItems
   rescue StandardError => e
     log.fatal("Unpack Items failed with error: #{e}")
     e.backtrace.each { |m| log.fatal(m) }
-    exit(1)
+    raise
   end
 end

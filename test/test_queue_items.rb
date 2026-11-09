@@ -103,4 +103,42 @@ class TestQueueItems < Minitest::Test
     assert_kind_of String, result[:error_message]
     assert_kind_of Integer, result[:failed_at]
   end
+
+  # --- Fatal path: run logs fatal, then re-raises the original error (no exit) ---
+
+  Boom = Class.new(StandardError)
+
+  def exploding_store
+    store = Object.new
+    store.define_singleton_method(:transaction) { |*| raise Boom, "kaboom" }
+    store
+  end
+
+  # Runs the block with stdout captured (debug: true logs there). If the code under
+  # test calls exit, fail the test instead of letting SystemExit end the suite:
+  # assert_raises re-raises SystemExit rather than flunking on it.
+  def capture_reraise
+    err = nil
+    out, _ = capture_io do
+      err = assert_raises(Boom) do
+        begin
+          yield
+        rescue SystemExit
+          flunk "run called exit instead of re-raising the original error"
+        end
+      end
+    end
+    [err, out]
+  end
+
+  def test_unexpected_error_in_run_is_logged_fatal_and_reraised
+    err, out = capture_reraise do
+      QueueItems.new(debug: true, store: exploding_store,
+                     resolver: fake_resolver({ digital_item: {}, cdn_url: "x" })).run
+    end
+    assert_instance_of Boom, err
+    assert_equal "kaboom", err.message
+    assert_match(/FATAL -- : Queue Items failed with error: kaboom/, out)
+    assert_match(/FATAL -- : .*queue_items\.rb:\d+/, out, "backtrace should be logged at fatal")
+  end
 end
