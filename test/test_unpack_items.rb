@@ -28,8 +28,11 @@ class TestUnpackItems < Minitest::Test
     {
       state: :downloaded,
       local_path: File.join(@tmpdir, "album.zip"),
-      band_name: "Test Artist",
-      album_title: "Test Album"
+      digital_item: {
+        "artist" => "Test Artist",
+        "title" => "Test Album",
+        "download_type" => "a"
+      }
     }.merge(overrides)
   end
 
