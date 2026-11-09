@@ -47,7 +47,6 @@ DEBUG='false'
 3. Copy the value of the `identity` cookie
 
 ## Running
-`bandy`'s shebang includes the `--yjit` flag, which may throw a warning if your local Ruby wasn't compiled with Rust support.
 
 ```sh
 ./bandy.rb

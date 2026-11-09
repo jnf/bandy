@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby --yjit
+#!/usr/bin/env ruby
 
 # dependencies
 require 'dotenv/load'
