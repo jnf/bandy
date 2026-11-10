@@ -94,6 +94,45 @@ class TestQueueItems < Minitest::Test
     assert_equal :seen, stored_item("a123")[:state]
   end
 
+  # First strike: the redownload_url may just be stale, so re-enrich for a fresh one.
+  def test_first_expiration_counts_one_strike
+    seed_store({ "a123" => item })
+    queue(resolver: failing_resolver(StandardError.new("ExpirationError")))
+    assert_equal 1, stored_item("a123")[:expiration_count]
+  end
+
+  # Second strike: it expired again on a fresh URL. Bandcamp is refusing the file;
+  # a human has to sort it out, so get it out of the queue.
+  def test_second_expiration_marks_failed
+    seed_store({ "a123" => item(expiration_count: 1) })
+    queue(resolver: failing_resolver(StandardError.new("ExpirationError")))
+
+    result = stored_item("a123")
+    assert_equal :failed, result[:state]
+    assert_match(/expired/i, result[:error_message])
+    assert_kind_of Integer, result[:failed_at]
+  end
+
+  def test_successful_queue_clears_expiration_count
+    seed_store({ "a123" => item(expiration_count: 1) })
+    queue
+    assert_equal :queued, stored_item("a123")[:state]
+    assert_equal 0, stored_item("a123")[:expiration_count]
+  end
+
+  def test_completion_log_counts_only_items_actually_queued
+    seed_store({ "a1" => item, "a2" => item(expiration_count: 1) })
+    calls = 0
+    resolver = Object.new
+    resolver.define_singleton_method(:resolve) do |*|
+      calls += 1
+      raise StandardError, "ExpirationError" if calls == 2
+      { digital_item: {}, cdn_url: "x" }
+    end
+    out, _ = capture_io { QueueItems.new(debug: true, store: @store, resolver: resolver).run }
+    assert_match(/Queue Items complete: 1 of 2 items queued/, out)
+  end
+
   def test_no_such_band_error_marks_failed
     seed_store({ "a123" => item })
     queue(resolver: failing_resolver(StandardError.new("NoSuchBandError")))
