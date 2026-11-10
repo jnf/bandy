@@ -80,23 +80,29 @@ end
 class Downloader
   attr_reader :download_path, :log
 
-  def initialize(download_path:, log:)
+  def initialize(download_path:, log:, http: HTTParty)
     @download_path = download_path
     @log = log
+    @http = http
   end
 
+  # Stage in download_path, not Dir.tmpdir: on the jukebox /tmp is tmpfs (RAM), so a
+  # whole album there competes with mpd, and mv across filesystems is a copy. Close
+  # before mv so Ruby's write buffer is flushed; otherwise a cross-device copy drops
+  # the last fragment, which is where a zip keeps its central directory.
   def call(item_key, cdn_url, digital_item)
-    temp = Tempfile.new(binmode: true)
+    temp = Tempfile.new(['bandy-', '.part'], download_path, binmode: true)
     log.info("temp name is #{File.basename(temp)}")
 
     begin
-      dl = HTTParty.get(cdn_url, stream_body: true) do |fragment|
+      dl = @http.get(cdn_url, stream_body: true) do |fragment|
         raise StandardError.new "fragment fail: #{fragment.code}" unless [2, 3].include? fragment.code / 100
         temp.write(fragment)
       end
 
       dl_name = dl.headers["content-disposition"].match(/filename=(\"?)(.+)\1/)[2] # lol
       local_path = "#{download_path}/(#{item_key}) #{dl_name}"
+      temp.close
       FileUtils.mv(temp.path, local_path)
       log.info("Saved #{item_key} to #{local_path}")
       local_path
