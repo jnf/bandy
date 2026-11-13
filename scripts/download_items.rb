@@ -104,6 +104,9 @@ class Downloader
       local_path = "#{download_path}/(#{item_key}) #{dl_name}"
       temp.close
       FileUtils.mv(temp.path, local_path)
+      # Tempfile is 0600 by design and mv keeps it; give the saved file the mode a
+      # plain create would, so a track cp'd into the library is readable by mpd.
+      File.chmod(0o666 & ~File.umask, local_path)
       log.info("Saved #{item_key} to #{local_path}")
       local_path
     ensure

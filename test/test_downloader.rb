@@ -75,6 +75,18 @@ class TestDownloader < Minitest::Test
     assert_equal File.join(@download_path, "(a123) Artist - Album.zip"), path
   end
 
+  # Tempfile creates at 0600 by design, and mv keeps the mode. A bare track is then
+  # cp'd into the library still at 0600, where mpd (group audio) can't read it.
+  # The saved file gets the mode a plain create would: 0666 less the umask, like zip
+  # extraction does.
+  def test_saved_file_mode_follows_the_umask_not_tempfile
+    old = File.umask(0o002)
+    path = downloader(fake_http(chunks)).call("t123", "https://cdn.example/x", {})
+    assert_equal 0o664, File.stat(path).mode & 0o777
+  ensure
+    File.umask(old)
+  end
+
   # /tmp on the jukebox is RAM. A whole album staged there competes with mpd.
   def test_stages_the_download_on_the_download_path_filesystem_not_tmpdir
     staged = []
