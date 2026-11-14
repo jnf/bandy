@@ -32,10 +32,12 @@ jobs:
           echo "ruby-build=$(sed -n 's/^RUBY_BUILD_SHA=//p' release/build-ruby.sh)" >> "$GITHUB_OUTPUT"
           echo "artifact=ruby-$version-aarch64-linux.tar.gz" >> "$GITHUB_OUTPUT"
       - id: cache
+        # release.yml is in the key because the image digest lives there. Tag builds
+        # always build uncached: caches are ref-scoped and this never runs on canon.
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: dist/${{ steps.meta.outputs.artifact }}
-          key: ruby-${{ steps.meta.outputs.version }}-aarch64-linux-rb${{ steps.meta.outputs.ruby-build }}-${{ hashFiles('.ruby-version', 'release/build-ruby.sh') }}
+          key: ruby-${{ steps.meta.outputs.version }}-aarch64-linux-rb${{ steps.meta.outputs.ruby-build }}-${{ hashFiles('.ruby-version', 'release/build-ruby.sh', '.github/workflows/release.yml') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bash release/build-ruby.sh dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
