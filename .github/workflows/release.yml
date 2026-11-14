@@ -170,6 +170,24 @@ jobs:
           echo "summary: $summary (exit $status)"
           echo "suite: \`$summary\`" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      - name: Every gem compiled in the package job ships its extension, and it loads
+        # The suite never requires some of them (minitest only loads prism for its
+        # CLI), so it can't notice one missing.
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.DIR }}
+        run: |
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
+          export PATH="$PWD/ruby/bin:$PATH"
+          ruby/bin/ruby -S bundle exec ruby -e '
+            built = Bundler.load.specs.select { File.exist?(File.join(_1.extension_dir, "gem.build_complete")) }
+            abort "no compiled gems found under #{Dir.pwd}" if built.empty?
+            built.each do |spec|
+              sos = Dir.glob(File.join(spec.extension_dir, "**", "*.so")).sort
+              abort "#{spec.full_name}: built, but no .so in #{spec.extension_dir}" if sos.empty?
+              sos.each { require _1 }
+              puts "#{spec.full_name}: #{sos.map { File.basename(_1) }.join(", ")} loaded"
+            end
+          '
       - name: bandy.rb loads its full require graph, without running the pipeline
         if: ${{ !cancelled() }} # report it even when the suite went red
         working-directory: ${{ env.DIR }}
