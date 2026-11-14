@@ -101,9 +101,10 @@ run_suite() {
   health "before suite"
   set +e
   (
-    unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_PATH BUNDLE_APP_CONFIG
-    export BUNDLE_GEMFILE="$rel/Gemfile" TMPDIR="$dir/tmp" PATH="$rel/ruby/bin:$PATH"
-    cd "$dir" && nice -n 10 "$rel/ruby/bin/ruby" -S bundle exec ruby "$rel/test/run.rb"
+    # Ruby itself reads these: an -r, a load path, or a gem dir from outside the release.
+    unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
+    export TMPDIR="$dir/tmp"
+    cd "$dir" && nice -n 10 "$rel/ruby/bin/ruby" "$rel/test/run.rb"
   ) 2>&1 | tee "$work/suite.out"
   status=${PIPESTATUS[0]}
   set -e
