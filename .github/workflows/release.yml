@@ -239,3 +239,210 @@ jobs:
           gh release create "$TAG" "artifact/$ASSET" "artifact/$ASSET.sha256" \
             --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" "${kind[@]}" \
             --notes "Ruby, gems, and bandy at $GITHUB_SHA, built for aarch64 Debian 13. Check with: sha256sum -c $ASSET.sha256"
+
+  deploy-test:
+    # deploy.sh against a real public release, in what the jukebox has: runtime
+    # libraries, curl, no compiler, and a throwaway HOME with bandy's state in it.
+    # Then doctored copies of that release, served from file://, for the refusals.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    container:
+      image: debian@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1 # trixie-20261027, multi-arch index
+    env:
+      # A published release (rc tags are deleted after their run: repoint this at a live tag).
+      TAG: v0.0.0-rc.2
+      HOME: /srv/home/jey
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runtime libraries and curl only
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            libssl3t64 libyaml-0-2 zlib1g libffi8 libgmp10 curl ca-certificates
+      - name: No compiler
+        run: |
+          for tool in cc gcc c++ g++ clang make ld as; do
+            if command -v "$tool"; then echo "compiler present: $tool"; exit 1; fi
+          done
+      - name: A jukebox-shaped HOME, and the checks every step shares
+        run: |
+          [ "$HOME" = /srv/home/jey ] || { echo "HOME is $HOME"; exit 1; }
+          mkdir -p "$HOME/bandy"/{store,logs,downloads,collection/Artist/Album} "$HOME/tmp"
+          cd "$HOME/bandy"
+          echo "IDENT='not-a-real-cookie'" > .env
+          head -c 4096 /dev/urandom > store/collection_items.pstore
+          echo "an old cron run" > logs/cron.log
+          echo "not really audio" > collection/Artist/Album/01.mp3
+          # The rsync era left a Gemfile here; the release must not pick it up.
+          printf 'source "https://rubygems.org"\ngem "decoy-stale-rsync-era-gemfile"\n' > Gemfile
+          find .env Gemfile store logs downloads collection -type f -exec sha256sum {} + | sort > "$RUNNER_TEMP/state.before"
+          cat > "$RUNNER_TEMP/checks.sh" <<'SH'
+          set -euo pipefail
+          DEPLOY="$GITHUB_WORKSPACE/release/deploy.sh"
+          cd "$HOME/bandy"
+          target() { readlink "$HOME/bandy/current" || echo "(none)"; }
+          fail() { echo "FAIL: $*"; exit 1; }
+          # deploy.sh left nothing behind: no work dir in ~/tmp, no staging, no temp link.
+          clean() {
+            [ -z "$(ls -A "$HOME/tmp")" ] || fail "left in ~/tmp: $(ls -A "$HOME/tmp")"
+            ! ls -d "$HOME/bandy"/releases/.staging-* "$HOME/bandy"/releases/.replaced-* "$HOME/bandy"/.current.new.* 2>/dev/null \
+              || fail "staging or temp link left behind"
+          }
+          expect_current() {
+            [ "$(target)" = "releases/$1" ] || fail "current -> $(target), want releases/$1"
+            grep -qx "tag=$1" current/REVISION || fail "current/REVISION doesn't name $1: $(cat current/REVISION)"
+          }
+          # deploy.sh <args> has to exit non-zero, say <pattern>, and leave current alone.
+          expect_refusal() {
+            local pattern=$1 before status; shift
+            before=$(target)
+            set +e; bash "$DEPLOY" "$@" > "$RUNNER_TEMP/out" 2>&1; status=$?; set -e
+            cat "$RUNNER_TEMP/out"
+            [ "$status" -ne 0 ] || fail "deploy.sh $* exited 0"
+            grep -q -- "$pattern" "$RUNNER_TEMP/out" || fail "deploy.sh $* didn't say: $pattern"
+            [ "$(target)" = "$before" ] || fail "current moved: $before -> $(target)"
+            clean
+          }
+          SH
+      - name: Deploy the real release
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" "$TAG"
+          expect_current "$TAG"
+          clean
+          [ "$(ls releases)" = "$TAG" ] || fail "releases: $(ls releases)"
+      - name: The cron line runs bandy from current, not the stale ~/bandy/Gemfile
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
+          # The cron line, up to where bandy.rb starts the pipeline (no Bandcamp).
+          current/ruby/bin/ruby -e '
+            path = File.expand_path("current/bandy.rb")
+            src = File.read(path, encoding: "UTF-8")
+            cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
+            eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
+            %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
+            homes = [File.expand_path("current"), File.realpath("current")].map { _1 + "/" }
+            puts "Gemfile: #{Bundler.default_gemfile}"
+            homes.any? { Bundler.default_gemfile.to_s.start_with?(_1) } or abort "bundler used #{Bundler.default_gemfile}"
+            stray = $LOADED_FEATURES.select { |f| f.start_with?("/") && homes.none? { f.start_with?(_1) } }
+            abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
+            puts "cron line: #{$LOADED_FEATURES.size} features, all from current"
+          '
+      - name: Redeploying the current tag does nothing
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" "$TAG" | tee "$RUNNER_TEMP/out"
+          grep -q "already current" "$RUNNER_TEMP/out" || fail "no 'already current'"
+          expect_current "$TAG"
+          clean
+      - name: Doctored copies of the release, served from file://
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          fx="$RUNNER_TEMP/fixtures"
+          mkdir -p "$fx/real"
+          curl -q --fail --location --silent --show-error -o "$fx/real.tar.gz" \
+            "https://github.com/jnf/bandy/releases/download/$TAG/bandy-$TAG-aarch64-linux.tar.gz"
+          tar -xzf "$fx/real.tar.gz" -C "$fx/real"
+          # tree <name>: a copy of the release whose REVISION names <name>
+          tree() { cp -a "$fx/real" "$fx/tree-$1"; sed -i "s/^tag=.*/tag=$1/" "$fx/tree-$1/REVISION"; }
+          # publish <name>: tarball and .sha256 at <base>/<name>/, as GitHub lays them out
+          publish() {
+            local a="bandy-$1-aarch64-linux.tar.gz"
+            mkdir -p "$fx/$1"
+            tar -C "$fx/tree-$1" --owner=0 --group=0 --numeric-owner -czf "$fx/$1/$a" .
+            (cd "$fx/$1" && sha256sum "$a" > "$a.sha256")
+          }
+          for good in v0.0.0-test.a v0.0.0-test.b; do tree "$good"; publish "$good"; done
+
+          # One byte changed after hashing: the .sha256 is for the unchanged tarball.
+          bad=v0.0.0-test.badbyte
+          tree "$bad"; publish "$bad"
+          cp "$fx/$bad/bandy-$bad-aarch64-linux.tar.gz.sha256" "$fx/sha.keep"
+          grep -q '^# dependencies$' "$fx/tree-$bad/bandy.rb"
+          sed -i 's/^# dependencies$/# dependencieZ/' "$fx/tree-$bad/bandy.rb"
+          publish "$bad"
+          cp "$fx/sha.keep" "$fx/$bad/bandy-$bad-aarch64-linux.tar.gz.sha256"
+          ! (cd "$fx/$bad" && sha256sum -c --quiet "bandy-$bad-aarch64-linux.tar.gz.sha256") || fail "badbyte fixture still matches"
+
+          # A release with one test made to fail, correctly hashed.
+          red=v0.0.0-test.redsuite
+          tree "$red"
+          printf '%s\n' "require 'minitest/autorun'" \
+            'class TestDeliberatelyRed < Minitest::Test' \
+            '  def test_deliberately_red = flunk("deliberately red: deploy-test suite control")' \
+            'end' > "$fx/tree-$red/test/test_zz_deliberately_red.rb"
+          publish "$red"
+          rm -rf "$fx"/tree-* "$fx/real" "$fx/real.tar.gz"
+          ls -R "$fx"
+      - name: "Control: a tarball with one byte changed fails the sha256 check, current stays"
+        env:
+          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          expect_refusal "FAILED at step: 2 sha256" v0.0.0-test.badbyte
+          grep -q "sha256 mismatch" "$RUNNER_TEMP/out" || fail "no sha256 mismatch"
+          [ ! -e releases/v0.0.0-test.badbyte ] || fail "badbyte release installed"
+          expect_current "$TAG"
+      - name: "Control: a release whose suite fails leaves current alone"
+        env:
+          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          expect_refusal "FAILED at step: 4 suite" v0.0.0-test.redsuite
+          grep -q "deliberately red" "$RUNNER_TEMP/out" || fail "the red test didn't run"
+          [ ! -e releases/v0.0.0-test.redsuite ] || fail "red release installed"
+          expect_current "$TAG"
+      - name: A second deploy, then a rollback flips current back
+        env:
+          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" v0.0.0-test.a
+          expect_current v0.0.0-test.a
+          clean
+          bash "$DEPLOY" --rollback | tee "$RUNNER_TEMP/out"
+          grep -qE ' 0 failures, 0 errors' "$RUNNER_TEMP/out" || fail "no passing suite in the rollback"
+          expect_current "$TAG"
+          clean
+          [ "$(ls releases | xargs)" = "$TAG v0.0.0-test.a" ] || fail "releases: $(ls releases | xargs)"
+      - name: deploy.sh refuses while bandy runs, and only bandy counts
+        env:
+          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          # bandy as cron starts it: ruby, with current/bandy.rb in its argv.
+          current/ruby/bin/ruby -e 'sleep 120' current/bandy.rb &
+          bandy=$!
+          sleep 2
+          expect_refusal "bandy is running (PID $bandy)" v0.0.0-test.b
+          expect_refusal "bandy is running (PID $bandy)" --rollback
+          kill "$bandy"
+          wait "$bandy" || true
+          # Not ruby, so not bandy, even with bandy.rb in its argv.
+          bash -c 'sleep 120; :' /srv/elsewhere/bandy.rb &
+          other=$!
+          sleep 1
+          bash "$DEPLOY" --rollback
+          expect_current v0.0.0-test.a
+          clean
+          kill "$other"
+          wait "$other" || true
+      - name: Pruning keeps two, current and the one before
+        env:
+          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" v0.0.0-test.b
+          expect_current v0.0.0-test.b
+          clean
+          [ "$(ls releases | xargs)" = "v0.0.0-test.a v0.0.0-test.b" ] || fail "releases: $(ls releases | xargs)"
+      - name: bandy's state is untouched
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          find .env Gemfile store logs downloads collection -type f -exec sha256sum {} + | sort > "$RUNNER_TEMP/state.after"
+          diff "$RUNNER_TEMP/state.before" "$RUNNER_TEMP/state.after" || fail "state changed"
+          ls -A "$HOME/bandy" "$HOME/bandy/releases"
