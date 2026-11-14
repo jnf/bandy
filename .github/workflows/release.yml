@@ -414,6 +414,10 @@ jobs:
           cron_home=/srv/home/cron
           mkdir -p "$cron_home/bandy/logs" "$cron_home/bandy/store"
           : > "$cron_home/bandy/.env"
+          # And the rsync era's stale ~/bandy/Gemfile, which the jukebox still has. It's
+          # what makes a stray require 'bundler/setup' show: with no Gemfile anywhere
+          # up the tree, bundler/setup quietly does nothing.
+          cp "$HOME/bandy/Gemfile" "$cron_home/bandy/Gemfile"
           ln -s "$(readlink -f "$HOME/bandy/current")" "$cron_home/bandy/current"
           # bandy.rb as it ships: executable, with a shebang cron's PATH can't satisfy.
           # Anything that execs it by path instead of running it with current's ruby dies.
@@ -450,7 +454,8 @@ jobs:
           done
           cat "$cron_home/bandy/logs/cron.log" "$RUNNER_TEMP/cron.sh.err" > "$RUNNER_TEMP/cron.all"
           if grep -F "env: 'ruby'" "$RUNNER_TEMP/cron.all"; then fail "env: 'ruby': something exec'd bandy.rb through its shebang"; fi
-          if grep -E 'Bundler|bundler/setup|Gemfile' "$RUNNER_TEMP/cron.all"; then fail "Bundler ran under the cron line"; fi
+          if grep -E 'Bundler|bundler/setup|Gemfile|decoy-stale' "$RUNNER_TEMP/cron.all"; then fail "Bundler ran under the cron line"; fi
+          [ ! -e "$cron_home/bandy/Gemfile.lock" ] || fail "something wrote ~/bandy/Gemfile.lock"
           grep -q "Starting Collection Sync" "$cron_home/bandy/logs/collection_sync.log" 2>/dev/null \
             || fail "no 'Starting Collection Sync': bandy never got past its requires"
           grep -q "Collection Sync died with error" "$cron_home/bandy/logs/collection_sync.log" \
