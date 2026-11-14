@@ -48,11 +48,25 @@ class TestUnpackItems < Minitest::Test
     @store.transaction { @store[:items][key] }
   end
 
-  def make_zip(path)
+  def make_zip(path, entries = { "track01.mp3" => "this is a song about cats. and love. but mostly cats." })
     Zip::OutputStream.open(path) do |zip|
-      zip.put_next_entry("track01.mp3")
-      zip.write("this is a song about cats. and love. but mostly cats.")
+      entries.each do |name, body|
+        zip.put_next_entry(name)
+        zip.write(body)
+      end
     end
+  end
+
+  # rubyzip refuses to write a name with a leading slash, so write a stand-in and
+  # patch the name bytes, which is all a hostile archive needs to do.
+  def make_zip_with_absolute_entry(path, entries)
+    make_zip(path, entries.transform_keys { |name| name.sub(%r{\A/}, '_') })
+    bytes = File.binread(path)
+    entries.each_key do |name|
+      next unless name.start_with?('/')
+      bytes.gsub!(name.sub(%r{\A/}, '_').b, name.b)
+    end
+    File.binwrite(path, bytes)
   end
 
   def expected_extract_dir
@@ -89,6 +103,56 @@ class TestUnpackItems < Minitest::Test
     assert_equal :unpacked, result[:state]
     assert_equal expected_extract_dir, result[:unpacked_path]
     assert_kind_of Integer, result[:unpacked_at]
+  end
+
+  # Entry names come from the archive, which bandy doesn't control. Both escapes
+  # resolve inside @tmpdir (three levels above the extract dir), never the real disk.
+  def test_entries_cannot_escape_the_extract_dir
+    make_zip(item[:local_path], {
+      "track01.mp3" => "fine",
+      "../../../escape.txt" => "owned",
+      "../../../outside/escape.txt" => "owned"
+    })
+    seed_store("a123" => item)
+    UnpackItems.new(store: @store).run
+
+    refute File.exist?(File.join(@tmpdir, "escape.txt")), "entry escaped the extract dir"
+    refute Dir.exist?(File.join(@tmpdir, "outside")), "bandy created a directory outside the extract dir"
+  end
+
+  # Most odd names are honest, so they're rewritten into the album, not dropped.
+  def test_unsafe_entry_names_land_inside_the_album
+    make_zip_with_absolute_entry(item[:local_path], {
+      "track01.mp3" => "fine",
+      "../../../escape.txt" => "rewritten",
+      "../../../outside/escape.txt" => "rewritten",
+      "/abs/track02.mp3" => "rewritten"
+    })
+    seed_store("a123" => item)
+    UnpackItems.new(store: @store).run
+
+    assert_equal :unpacked, stored_state("a123")
+    %w[track01.mp3 escape.txt outside/escape.txt abs/track02.mp3].each do |rel|
+      assert File.exist?(File.join(expected_extract_dir, rel)), "#{rel} missing from the album"
+    end
+  end
+
+  # The containment check is the guarantee under the sanitizer: if the sanitizer ever
+  # lets a traversal through, nothing is written and the item is parked as :failed.
+  def test_containment_refuses_the_archive_if_the_sanitizer_fails
+    leaky = Class.new(UnpackItems) { def safe_relative_path(name) = name }
+    # A sibling sharing the album's name as a prefix is the shape of CVE-2026-85396.
+    make_zip(item[:local_path], {
+      "track01.mp3" => "fine",
+      "../Test Album2/sneak.txt" => "owned"
+    })
+    seed_store("a123" => item)
+    leaky.new(store: @store).run
+
+    assert_equal :failed, stored_state("a123")
+    refute File.exist?(File.join(ENV['UNPACK_PATH'], "Test Artist", "Test Album2", "sneak.txt")), "entry escaped into a sibling dir"
+    refute File.exist?(File.join(expected_extract_dir, "track01.mp3")), "nothing should extract from a refused archive"
+    assert File.exist?(item[:local_path]), "a refused archive is kept for inspection"
   end
 
   def test_successful_unpack_keeps_archive_by_default
