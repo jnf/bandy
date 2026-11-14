@@ -61,12 +61,13 @@ class UnpackItems
               targets = zip_file.filter_map do |entry|
                 relative = safe_relative_path(entry.name.force_encoding('utf-8'))
                 next if relative.empty?
-                [entry, contained_path(extract_dir, relative)]
+                [entry, relative, contained_path(extract_dir, relative)]
               end
 
-              targets.each do |entry, dest_path|
+              targets.each do |entry, relative, dest_path|
                 FileUtils.mkdir_p(File.dirname(dest_path))
-                entry.extract(dest_path) unless File.exist?(dest_path)
+                next if File.exist?(dest_path)
+                entry.extract(relative, destination_directory: extract_dir)
               end
             end
           end
