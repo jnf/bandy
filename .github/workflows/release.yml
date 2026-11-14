@@ -203,7 +203,7 @@ jobs:
               require name
               sos.each do |so|
                 require so.delete_suffix(".so")
-                # From the gem's lib/ (RubyGems copies it there) or its extension dir.
+                # From the lib/ dir (RubyGems copies it there) or the extension dir.
                 $LOADED_FEATURES.any? { _1.end_with?("/#{so}") && _1.start_with?(vendor) } or abort "#{full_name}: #{so} never loaded from #{vendor}"
               end
               puts "#{full_name}: #{sos.join(", ")} loaded"
