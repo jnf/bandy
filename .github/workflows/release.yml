@@ -243,22 +243,28 @@ jobs:
             --notes "Ruby, gems, and bandy at $GITHUB_SHA, built for aarch64 Debian 13. Check with: sha256sum -c $ASSET.sha256"
 
   deploy-test:
-    # deploy.sh against a real public release, in what the jukebox has: runtime
+    # deploy.sh against this commit's release, in what the jukebox has: runtime
     # libraries, curl, no compiler, and a throwaway HOME with bandy's state in it.
-    # Then doctored copies of that release, served from file://, for the refusals.
-    if: github.event_name == 'pull_request'
+    # The package job's tarball is served from file:// under a fake tag, beside
+    # doctored copies of it for the refusals. Nothing here depends on a live release.
+    needs: package
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     container:
       image: debian@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1 # trixie-20261027, multi-arch index
     env:
-      # A published release (rc tags are deleted after their run: repoint this at a live tag).
-      TAG: v0.0.0-rc.2
+      ASSET: ${{ needs.package.outputs.asset }}
+      # The package job's tarball, byte for byte, published under this name.
+      TAG: v0.0.0-test.head
       HOME: /srv/home/jey
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.package.outputs.asset }}
+          path: artifact
       - name: Runtime libraries and curl only
         run: |
           apt-get update -q
@@ -286,6 +292,8 @@ jobs:
           DEPLOY="$GITHUB_WORKSPACE/release/deploy.sh"
           # RUNNER_TEMP is the container path; the runner.temp expression is the host one.
           FIXTURES="file://$RUNNER_TEMP/fixtures"
+          # Every deploy in this job comes from the fixtures, never from GitHub.
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           cd "$HOME/bandy"
           target() { readlink "$HOME/bandy/current" || echo "(none)"; }
           fail() { echo "FAIL: $*"; exit 1; }
@@ -297,7 +305,9 @@ jobs:
           }
           expect_current() {
             [ "$(target)" = "releases/$1" ] || fail "current -> $(target), want releases/$1"
-            grep -qx "tag=$1" current/REVISION || fail "current/REVISION doesn't name $1: $(cat current/REVISION)"
+            grep -qx "sha=$GITHUB_SHA" current/REVISION || fail "current/REVISION isn't this commit's: $(cat current/REVISION)"
+            # $TAG is the package job's bytes, unedited: its REVISION has no tag= on a PR.
+            [ "$1" = "$TAG" ] || grep -qx "tag=$1" current/REVISION || fail "current/REVISION doesn't name $1: $(cat current/REVISION)"
           }
           # deploy.sh <args> has to exit non-zero, say <pattern>, and leave current alone.
           expect_refusal() {
@@ -311,48 +321,28 @@ jobs:
             clean
           }
           SH
-      - name: Deploy the real release
+      - name: This commit's release, and doctored copies of it, served from file://
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          bash "$DEPLOY" "$TAG"
-          expect_current "$TAG"
-          clean
-          [ "$(ls releases)" = "$TAG" ] || fail "releases: $(ls releases)"
-      - name: The cron line runs bandy from current, not the stale ~/bandy/Gemfile
-        run: |
-          . "$RUNNER_TEMP/checks.sh"
-          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
-          # The cron line, up to where bandy.rb starts the pipeline (no Bandcamp).
-          current/ruby/bin/ruby -e '
-            path = File.expand_path("current/bandy.rb")
-            src = File.read(path, encoding: "UTF-8")
-            cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
-            eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
-            %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
-            homes = [File.expand_path("current"), File.realpath("current")].map { _1 + "/" }
-            puts "Gemfile: #{Bundler.default_gemfile}"
-            homes.any? { Bundler.default_gemfile.to_s.start_with?(_1) } or abort "bundler used #{Bundler.default_gemfile}"
-            stray = $LOADED_FEATURES.select { |f| f.start_with?("/") && homes.none? { f.start_with?(_1) } }
-            abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
-            puts "cron line: #{$LOADED_FEATURES.size} features, all from current"
-          '
-      - name: Redeploying the current tag does nothing
-        run: |
-          . "$RUNNER_TEMP/checks.sh"
-          bash "$DEPLOY" "$TAG" | tee "$RUNNER_TEMP/out"
-          grep -q "already current" "$RUNNER_TEMP/out" || fail "no 'already current'"
-          expect_current "$TAG"
-          clean
-      - name: Doctored copies of the release, served from file://
-        run: |
-          . "$RUNNER_TEMP/checks.sh"
+          art="$GITHUB_WORKSPACE/artifact"
+          (cd "$art" && sha256sum -c "$ASSET.sha256")
           fx="$RUNNER_TEMP/fixtures"
-          mkdir -p "$fx/real"
-          curl -q --fail --location --silent --show-error -o "$fx/real.tar.gz" \
-            "https://github.com/jnf/bandy/releases/download/$TAG/bandy-$TAG-aarch64-linux.tar.gz"
-          tar -xzf "$fx/real.tar.gz" -C "$fx/real"
-          # tree <name>: a copy of the release whose REVISION names <name>
-          tree() { cp -a "$fx/real" "$fx/tree-$1"; sed -i "s/^tag=.*/tag=$1/" "$fx/tree-$1/REVISION"; }
+          mkdir -p "$fx/real" "$fx/$TAG"
+          # The package job's tarball as it is, under the name deploy.sh asks for.
+          cp "$art/$ASSET" "$fx/$TAG/bandy-$TAG-aarch64-linux.tar.gz"
+          (cd "$fx/$TAG" && sha256sum "bandy-$TAG-aarch64-linux.tar.gz" > "bandy-$TAG-aarch64-linux.tar.gz.sha256")
+          tar -xzf "$art/$ASSET" -C "$fx/real"
+          # tree <name>: a copy of the release whose REVISION names <name>. A PR build's
+          # REVISION has only sha=, so the tag= line gets added.
+          tree() {
+            cp -a "$fx/real" "$fx/tree-$1"
+            if grep -q '^tag=' "$fx/tree-$1/REVISION"; then
+              sed -i "s/^tag=.*/tag=$1/" "$fx/tree-$1/REVISION"
+            else
+              echo "tag=$1" >> "$fx/tree-$1/REVISION"
+            fi
+            grep -qx "tag=$1" "$fx/tree-$1/REVISION" || fail "tree $1: REVISION doesn't name it"
+          }
           # publish <name>: tarball and .sha256 at <base>/<name>/, as GitHub lays them out
           publish() {
             local a="bandy-$1-aarch64-linux.tar.gz"
@@ -380,12 +370,53 @@ jobs:
             '  def test_deliberately_red = flunk("deliberately red: deploy-test suite control")' \
             'end' > "$fx/tree-$red/test/test_zz_deliberately_red.rb"
           publish "$red"
-          rm -rf "$fx"/tree-* "$fx/real" "$fx/real.tar.gz"
+          rm -rf "$fx"/tree-* "$fx/real" "$fx/sha.keep"
           ls -R "$fx"
+      - name: Deploy this commit's release
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" "$TAG"
+          expect_current "$TAG"
+          clean
+          [ "$(ls releases)" = "$TAG" ] || fail "releases: $(ls releases)"
+      - name: The cron line runs bandy from current, not the stale ~/bandy/Gemfile
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
+          # This commit's bandy.rb, so its BUNDLE_GEMFILE line is what's under test.
+          cmp current/bandy.rb "$GITHUB_WORKSPACE/bandy.rb" || fail "current/bandy.rb isn't this commit's"
+          # The decoy has to bite: bundler/setup from ~/bandy, with nothing pointing it
+          # at current/Gemfile, fails on the stale Gemfile.
+          if current/ruby/bin/ruby -e 'require "bundler/setup"' > "$RUNNER_TEMP/decoy.out" 2>&1; then
+            cat "$RUNNER_TEMP/decoy.out"; fail "bundler/setup from ~/bandy didn't trip on the decoy Gemfile"
+          fi
+          cat "$RUNNER_TEMP/decoy.out"
+          grep -q decoy-stale-rsync-era-gemfile "$RUNNER_TEMP/decoy.out" || fail "bundler/setup failed, but not on the decoy"
+          [ ! -e Gemfile.lock ] || fail "bundler wrote ~/bandy/Gemfile.lock"
+          # The cron line, up to where bandy.rb starts the pipeline (no Bandcamp).
+          current/ruby/bin/ruby -e '
+            path = File.expand_path("current/bandy.rb")
+            src = File.read(path, encoding: "UTF-8")
+            cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
+            eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
+            %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
+            homes = [File.expand_path("current"), File.realpath("current")].map { _1 + "/" }
+            puts "Gemfile: #{Bundler.default_gemfile}"
+            homes.any? { Bundler.default_gemfile.to_s.start_with?(_1) } or abort "bundler used #{Bundler.default_gemfile}"
+            stray = $LOADED_FEATURES.select { |f| f.start_with?("/") && homes.none? { f.start_with?(_1) } }
+            abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
+            puts "cron line: #{$LOADED_FEATURES.size} features, all from current"
+          '
+      - name: Redeploying the current tag does nothing
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          bash "$DEPLOY" "$TAG" | tee "$RUNNER_TEMP/out"
+          grep -q "already current" "$RUNNER_TEMP/out" || fail "no 'already current'"
+          expect_current "$TAG"
+          clean
       - name: "Control: a tarball with one byte changed fails the sha256 check, current stays"
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           expect_refusal "FAILED at step: 2 sha256" v0.0.0-test.badbyte
           grep -q "sha256 mismatch" "$RUNNER_TEMP/out" || fail "no sha256 mismatch"
           [ ! -e releases/v0.0.0-test.badbyte ] || fail "badbyte release installed"
@@ -393,7 +424,6 @@ jobs:
       - name: "Control: a release whose suite fails leaves current alone"
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           expect_refusal "FAILED at step: 4 suite" v0.0.0-test.redsuite
           grep -q "deliberately red" "$RUNNER_TEMP/out" || fail "the red test didn't run"
           [ ! -e releases/v0.0.0-test.redsuite ] || fail "red release installed"
@@ -401,7 +431,6 @@ jobs:
       - name: A second deploy, then a rollback flips current back
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           bash "$DEPLOY" v0.0.0-test.a
           expect_current v0.0.0-test.a
           clean
@@ -409,11 +438,10 @@ jobs:
           grep -qE ' 0 failures, 0 errors' "$RUNNER_TEMP/out" || fail "no passing suite in the rollback"
           expect_current "$TAG"
           clean
-          [ "$(ls releases | xargs)" = "$TAG v0.0.0-test.a" ] || fail "releases: $(ls releases | xargs)"
+          [ "$(ls releases | xargs)" = "v0.0.0-test.a $TAG" ] || fail "releases: $(ls releases | xargs)"
       - name: deploy.sh refuses while bandy runs, and only bandy counts
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           # bandy as cron starts it: ruby, with current/bandy.rb in its argv.
           current/ruby/bin/ruby -e 'sleep 120' current/bandy.rb &
           bandy=$!
@@ -434,7 +462,6 @@ jobs:
       - name: Pruning keeps two, current and the one before
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           bash "$DEPLOY" v0.0.0-test.b
           expect_current v0.0.0-test.b
           clean
