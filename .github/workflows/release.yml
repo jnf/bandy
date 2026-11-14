@@ -178,7 +178,7 @@ jobs:
           # bundler/setup, then the gems, the api classes, and every script.
           ruby/bin/ruby -e '
             dir = Dir.pwd
-            src = File.read("bandy.rb")
+            src = File.read("bandy.rb", encoding: "UTF-8") # no locale in the container
             cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
             eval(src[0...cut], TOPLEVEL_BINDING, File.join(dir, "bandy.rb"), 1)
             %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems
