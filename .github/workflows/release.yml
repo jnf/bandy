@@ -405,32 +405,14 @@ jobs:
           clean
           cmp "$DEPLOY" "$GITHUB_WORKSPACE/release/deploy.sh" || fail "current/release/deploy.sh isn't this commit's"
           [ "$(ls releases)" = "$TAG" ] || fail "releases: $(ls releases)"
-      - name: bandy.rb, from ~/bandy, loads everything from current and never Bundler
-        run: |
-          . "$RUNNER_TEMP/checks.sh"
-          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
-          cmp current/bandy.rb "$GITHUB_WORKSPACE/bandy.rb" || fail "current/bandy.rb isn't this commit's"
-          # The rsync era's stale ~/bandy/Gemfile sits in the working dir; nothing may read it.
-          current/ruby/bin/ruby -e '
-            path = File.expand_path("current/bandy.rb")
-            src = File.read(path, encoding: "UTF-8")
-            cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
-            eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
-            %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
-            abort "bandy.rb loaded Bundler" if defined?(Bundler)
-            homes = [File.expand_path("current"), File.realpath("current")].map { _1 + "/" }
-            stray = $LOADED_FEATURES.select { |f| f.start_with?("/") && homes.none? { f.start_with?(_1) } }
-            abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
-            puts "bandy.rb: #{$LOADED_FEATURES.size} features, all from current, no Bundler"
-          '
-          [ ! -e Gemfile.lock ] || fail "something wrote ~/bandy/Gemfile.lock"
       - name: "The literal cron line, in cron's environment, with no network, gets into the pipeline"
         run: |
           . "$RUNNER_TEMP/checks.sh"
           # A second fake HOME, so this run's logs stay out of the state check below:
-          # an empty .env, logs/ for the redirect, and current -> the release just deployed.
+          # an empty .env, logs/ and store/ as the box has them, and current -> the
+          # release just deployed.
           cron_home=/srv/home/cron
-          mkdir -p "$cron_home/bandy/logs"
+          mkdir -p "$cron_home/bandy/logs" "$cron_home/bandy/store"
           : > "$cron_home/bandy/.env"
           ln -s "$(readlink -f "$HOME/bandy/current")" "$cron_home/bandy/current"
           # bandy.rb as it ships: executable, with a shebang cron's PATH can't satisfy.
@@ -474,6 +456,25 @@ jobs:
           grep -q "Collection Sync died with error" "$cron_home/bandy/logs/collection_sync.log" \
             || fail "the pipeline didn't stop at the network"
           [ "$status" -ne 0 ] || fail "the cron line exited 0 with no network"
+      - name: bandy.rb, from ~/bandy, loads everything from current and never Bundler
+        run: |
+          . "$RUNNER_TEMP/checks.sh"
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
+          cmp current/bandy.rb "$GITHUB_WORKSPACE/bandy.rb" || fail "current/bandy.rb isn't this commit's"
+          # The rsync era's stale ~/bandy/Gemfile sits in the working dir; nothing may read it.
+          current/ruby/bin/ruby -e '
+            path = File.expand_path("current/bandy.rb")
+            src = File.read(path, encoding: "UTF-8")
+            cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
+            eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
+            %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
+            abort "bandy.rb loaded Bundler" if defined?(Bundler)
+            homes = [File.expand_path("current"), File.realpath("current")].map { _1 + "/" }
+            stray = $LOADED_FEATURES.select { |f| f.start_with?("/") && homes.none? { f.start_with?(_1) } }
+            abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
+            puts "bandy.rb: #{$LOADED_FEATURES.size} features, all from current, no Bundler"
+          '
+          [ ! -e Gemfile.lock ] || fail "something wrote ~/bandy/Gemfile.lock"
       - name: Redeploying the current tag does nothing
         run: |
           . "$RUNNER_TEMP/checks.sh"
