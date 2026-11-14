@@ -20,7 +20,7 @@ GEM
     nokogiri (1.19.4-arm64-darwin)
       racc (~> 1.4)
     racc (1.8.1)
-    rubyzip (2.4.1)
+    rubyzip (3.4.0)
 
 PLATFORMS
   aarch64-linux-gnu
@@ -31,7 +31,7 @@ DEPENDENCIES
   dotenv (~> 3.1.7)
   httparty (~> 0.22)
   nokogiri (= 1.19.4)
-  rubyzip (~> 2.3)
+  rubyzip (~> 3.4)
 
 CHECKSUMS
   bigdecimal (4.0.1) sha256=8b07d3d065a9f921c80ceaea7c9d4ae596697295b584c296fe599dd0ad01c4a7
@@ -45,7 +45,7 @@ CHECKSUMS
   nokogiri (1.19.4-aarch64-linux-gnu) sha256=1269fb644a6de405057a53dd5c762b1209b43ca7424f839454d3dbc677c31a8f
   nokogiri (1.19.4-arm64-darwin) sha256=a46db9853286e6597b36ebc6953817d15acf3a299583eb3f89fdc6f91dd63527
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f
-  rubyzip (2.4.1) sha256=8577c88edc1fde8935eb91064c5cb1aef9ad5494b940cf19c775ee833e075615
+  rubyzip (3.4.0) sha256=6de39bc9eba302b635a476d16c9e16b0872ad24517c2f98f2b3a7ea23caff57b
 
 BUNDLED WITH
   4.0.3
