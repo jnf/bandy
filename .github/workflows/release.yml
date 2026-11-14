@@ -165,14 +165,13 @@ jobs:
           test -f "$DIR/release/deploy.sh" || { echo "no release/deploy.sh in $ASSET"; exit 1; }
           cmp "$GITHUB_WORKSPACE/src/release/deploy.sh" "$DIR/release/deploy.sh"
           echo "release/deploy.sh: $(sha256sum < "$DIR/release/deploy.sh" | cut -d' ' -f1)"
-      - name: Suite, from the release, with the release's Ruby
+      - name: Suite, from the release, with the release's Ruby, as plain ruby
         working-directory: ${{ env.DIR }}
         run: |
-          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
-          export PATH="$PWD/ruby/bin:$PATH"
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
           mkdir -p logs
           set +e
-          ruby/bin/ruby -S bundle exec ruby test/run.rb 2>&1 | tee "$RUNNER_TEMP/suite.out"
+          ruby/bin/ruby test/run.rb 2>&1 | tee "$RUNNER_TEMP/suite.out"
           status=${PIPESTATUS[0]}
           set -e
           # A bare non-zero exit with no summary is a crash, not a red suite.
@@ -183,34 +182,41 @@ jobs:
           exit "$status"
       - name: Every gem compiled in the package job ships its extension, and it loads
         # The suite never requires some of them (minitest only loads prism for its
-        # CLI), so it can't notice one missing.
+        # CLI), so it can't notice one missing. Through the standalone setup, as
+        # bandy loads them: each .so has to come from the release's vendor/bundle.
         if: ${{ !cancelled() }}
         working-directory: ${{ env.DIR }}
         run: |
-          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
-          export PATH="$PWD/ruby/bin:$PATH"
-          ruby/bin/ruby -S bundle exec ruby -e '
-            built = Bundler.load.specs.select { File.exist?(File.join(_1.extension_dir, "gem.build_complete")) }
-            abort "no compiled gems found under #{Dir.pwd}" if built.empty?
-            built.each do |spec|
-              sos = Dir.glob("**/*.so", base: spec.extension_dir).sort
-              abort "#{spec.full_name}: built, but no .so in #{spec.extension_dir}" if sos.empty?
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
+          ruby/bin/ruby -e '
+            require File.join(Dir.pwd, "vendor/bundle/bundler/setup.rb")
+            vendor = File.join(Dir.pwd, "vendor/bundle/")
+            root = File.join(vendor, "ruby", RbConfig::CONFIG["ruby_version"])
+            built = Dir.glob("extensions/*/*/*/gem.build_complete", base: root).map { File.join(root, File.dirname(_1)) }
+            abort "no compiled gems found under #{root}" if built.empty?
+            built.sort.each do |ext_dir|
+              full_name = File.basename(ext_dir)
+              name = full_name.sub(/-[^-]+\z/, "")
+              sos = Dir.glob("**/*.so", base: ext_dir).sort
+              abort "#{full_name}: built, but no .so in #{ext_dir}" if sos.empty?
               # Through the gem entry point: an extension can lean on its Ruby half.
-              require spec.name
+              require name
               sos.each do |so|
                 require so.delete_suffix(".so")
-                $LOADED_FEATURES.any? { _1.end_with?("/#{so}") } or abort "#{spec.full_name}: #{so} never loaded"
+                # From the gem's lib/ (RubyGems copies it there) or its extension dir.
+                $LOADED_FEATURES.any? { _1.end_with?("/#{so}") && _1.start_with?(vendor) } or abort "#{full_name}: #{so} never loaded from #{vendor}"
               end
-              puts "#{spec.full_name}: #{sos.join(", ")} loaded"
+              puts "#{full_name}: #{sos.join(", ")} loaded"
             end
+            abort "Bundler loaded" if defined?(Bundler)
           '
       - name: bandy.rb loads its full require graph, without running the pipeline
         if: ${{ !cancelled() }} # report it even when the suite went red
         working-directory: ${{ env.DIR }}
         run: |
-          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
+          unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH
           # Everything in bandy.rb before the first pipeline stage runs: its own
-          # bundler/setup, then the gems, the api classes, and every script.
+          # standalone setup, then the gems, the api classes, and every script.
           ruby/bin/ruby -e '
             dir = Dir.pwd
             src = File.read("bandy.rb", encoding: "UTF-8") # no locale in the container
@@ -220,7 +226,8 @@ jobs:
                HTTParty Nokogiri Zip Dotenv PStore].each { Object.const_get(_1) }
             stray = $LOADED_FEATURES.select { _1.start_with?("/") && !_1.start_with?(dir + "/") }
             abort "loaded from outside the release:\n#{stray.join("\n")}" unless stray.empty?
-            puts "bandy.rb require graph: #{$LOADED_FEATURES.size} features, all under #{dir}"
+            abort "bandy.rb loaded Bundler" if defined?(Bundler)
+            puts "bandy.rb require graph: #{$LOADED_FEATURES.size} features, all under #{dir}, no Bundler"
           '
 
   release:
