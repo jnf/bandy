@@ -182,10 +182,15 @@ jobs:
             built = Bundler.load.specs.select { File.exist?(File.join(_1.extension_dir, "gem.build_complete")) }
             abort "no compiled gems found under #{Dir.pwd}" if built.empty?
             built.each do |spec|
-              sos = Dir.glob(File.join(spec.extension_dir, "**", "*.so")).sort
+              sos = Dir.glob("**/*.so", base: spec.extension_dir).sort
               abort "#{spec.full_name}: built, but no .so in #{spec.extension_dir}" if sos.empty?
-              sos.each { require _1 }
-              puts "#{spec.full_name}: #{sos.map { File.basename(_1) }.join(", ")} loaded"
+              # Through the gem's own entry point: an extension can lean on its Ruby half.
+              require spec.name
+              sos.each do |so|
+                require so.delete_suffix(".so")
+                $LOADED_FEATURES.any? { _1.end_with?("/#{so}") } or abort "#{spec.full_name}: #{so} never loaded"
+              end
+              puts "#{spec.full_name}: #{sos.join(", ")} loaded"
             end
           '
       - name: bandy.rb loads its full require graph, without running the pipeline
