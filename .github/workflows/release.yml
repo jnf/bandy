@@ -184,7 +184,7 @@ jobs:
             built.each do |spec|
               sos = Dir.glob("**/*.so", base: spec.extension_dir).sort
               abort "#{spec.full_name}: built, but no .so in #{spec.extension_dir}" if sos.empty?
-              # Through the gem's own entry point: an extension can lean on its Ruby half.
+              # Through the gem entry point: an extension can lean on its Ruby half.
               require spec.name
               sos.each do |so|
                 require so.delete_suffix(".so")
