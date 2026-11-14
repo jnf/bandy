@@ -1,0 +1,23 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [canon]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # aarch64 glibc, same platform as the jukebox; the lockfile only lists the platforms bandy runs on
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        with:
+          bundler-cache: true # reads .ruby-version, installs from the frozen lockfile
+      - run: bundle exec ruby test/run.rb
