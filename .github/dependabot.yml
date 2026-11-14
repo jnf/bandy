@@ -11,3 +11,14 @@ updates:
     groups:
       gems:
         patterns: ["*"]
+
+  # Actions are pinned by SHA; Dependabot keeps the SHA and its version comment in step.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
