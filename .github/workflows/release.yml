@@ -171,6 +171,7 @@ jobs:
           echo "suite: \`$summary\`" >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - name: bandy.rb loads its full require graph, without running the pipeline
+        if: ${{ !cancelled() }} # report it even when the suite went red
         working-directory: ${{ env.DIR }}
         run: |
           unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
