@@ -56,8 +56,15 @@ class UnpackItems
           else # Extract zip file
             log.info("Unpacking #{item_key} from #{zip_path}")
             Zip::File.open(zip_path) do |zip_file|
-              zip_file.each do |entry|
-                dest_path = File.join(extract_dir, entry.name.force_encoding('utf-8'))
+              # Resolve every destination before writing anything, so a refused
+              # archive leaves nothing behind.
+              targets = zip_file.filter_map do |entry|
+                relative = safe_relative_path(entry.name.force_encoding('utf-8'))
+                next if relative.empty?
+                [entry, contained_path(extract_dir, relative)]
+              end
+
+              targets.each do |entry, dest_path|
                 FileUtils.mkdir_p(File.dirname(dest_path))
                 entry.extract(dest_path) unless File.exist?(dest_path)
               end
@@ -78,6 +85,10 @@ class UnpackItems
             unpacked_path: extract_dir,
             unpacked_at: Time.now.to_i
           })
+        rescue UnsafeEntryError => e
+          # Not retryable: the same archive resolves the same way every run
+          log.error("Refused #{item_key}, archive kept at #{zip_path}: #{e.message}")
+          store[:items][item_key][:state] = :failed
         rescue StandardError => e
           # Handle corrupted/incomplete zip files
           if e.message.include?("Zip end of central directory signature not found")
@@ -98,4 +109,26 @@ class UnpackItems
     e.backtrace.each { |m| log.fatal(m) }
     raise
   end
+
+  private
+
+  # Entry names come from the archive. Most odd ones are honest (a track titled "..",
+  # a Windows backslash), so rewrite them into the album rather than reject them:
+  # drop empty, "." and ".." segments, which also strips a leading slash.
+  def safe_relative_path(name)
+    name.split(%r{[/\\]}).reject { |seg| seg.empty? || seg == '.' || seg == '..' }.join('/')
+  end
+
+  # The guarantee under safe_relative_path: whatever the name, the destination
+  # stays inside dir, or the whole archive is refused.
+  def contained_path(dir, relative)
+    root = File.expand_path(dir)
+    path = File.expand_path(relative, root)
+    unless path.start_with?(root + File::SEPARATOR)
+      raise UnsafeEntryError, "#{relative.inspect} resolves outside #{root}"
+    end
+    path
+  end
+
+  class UnsafeEntryError < StandardError; end
 end
