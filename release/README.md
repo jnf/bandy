@@ -1,0 +1,86 @@
+# Releases
+
+bandy ships as one tarball per release: Ruby, the gems, and bandy, built in CI for the jukebox (aarch64, Debian 13). The jukebox never compiles anything; it downloads a release, checks it, tests it, and switches to it.
+
+- `build-ruby.sh` -- builds a relocatable Ruby (CI's `ruby` job)
+- `probe-ruby.sh` -- proves that Ruby runs from somewhere else (CI's `ruby-probe` job)
+- `package.sh` -- Ruby + vendored gems + bandy into one tarball (CI's `package` job)
+- `deploy.sh` -- puts a published release on the jukebox (by hand, on the box); every release carries its own copy at `release/deploy.sh`
+
+## The layout on the jukebox
+
+```
+~/bandy/
+  .env store/ logs/ downloads/ collection/   bandy's state; deploy.sh never touches it
+  releases/<tag>/                            at most two: current, and the one before
+    release/deploy.sh                        the deploy.sh CI tested with that release
+  current -> releases/<tag>
+```
+
+## First deploy: bootstrap
+
+A box with no `~/bandy/current/release/deploy.sh` (a fresh one, or a current from before releases carried it) gets it out of the first release's tarball, once:
+
+```sh
+mkdir -p ~/tmp/bootstrap && cd ~/tmp/bootstrap
+curl -fLO https://github.com/jnf/bandy/releases/download/v2026.11.14/bandy-v2026.11.14-aarch64-linux.tar.gz
+curl -fLO https://github.com/jnf/bandy/releases/download/v2026.11.14/bandy-v2026.11.14-aarch64-linux.tar.gz.sha256
+sha256sum -c bandy-v2026.11.14-aarch64-linux.tar.gz.sha256
+tar -xzf bandy-v2026.11.14-aarch64-linux.tar.gz release/deploy.sh
+bash ~/tmp/bootstrap/release/deploy.sh v2026.11.14
+cd ~ && rm -rf ~/tmp/bootstrap
+```
+
+That deploy.sh downloads the same release again and deploys it like any other. After that, the box always has one in `current`. A `~/bandy/deploy.sh` copied by hand in the days before releases carried it can go.
+
+## Deploy
+
+```sh
+bash ~/bandy/current/release/deploy.sh v2026.11.14
+```
+
+The deploy.sh that runs is the one from the release that's current, which CI tested alongside it. Running it from `current` is safe while it switches `current` away: it works in `~/bandy` by absolute path, never relative to its own dir; bash holds the script open, so the symlink moving underneath doesn't change what's running; and pruning always keeps the release that was current, which is the one it lives in.
+
+In order, it:
+
+1. downloads the tarball and its `.sha256` from the GitHub release with `curl`, into `~/tmp/` (the SD card; `/tmp` is RAM)
+2. checks the sha256
+3. extracts it to a hidden staging dir in `releases/`
+4. runs bandy's suite from the release, with the release's own Ruby, niced so playback wins (about 10s on the Pi)
+5. renames it to `releases/<tag>` and flips `current` to it in one rename
+
+Then it prunes `releases/` down to two, the new current and the one before, and removes its temp files. Deploying the tag that's already current does nothing. Deploying a kept tag that isn't current downloads it fresh and replaces the old copy.
+
+## Roll back
+
+```sh
+bash ~/bandy/current/release/deploy.sh --rollback
+```
+
+Switches `current` to the other kept release, after its suite passes on the box. Running it again flips back, with the deploy.sh from the release you rolled back to. If that release predates shipping deploy.sh, bootstrap again from the release you want.
+
+## What it refuses, and why
+
+Anything that fails before the switch leaves `current` where it was and prints `FAILED at step: <step>`.
+
+- **A sha256 that doesn't match**, or a `.sha256` that isn't one line naming the tarball. It catches a corrupted download. It doesn't catch a compromised GitHub account; GitHub is the trust root.
+- **A release whose suite fails**, or crashes without minitest's summary line. The box tests what it's about to run, because CI's arm cores aren't the Pi's Cortex-A53. A gem built for newer cores passes CI and dies on the box.
+- **Running while bandy runs.** Any `ruby` process with `bandy.rb` in its arguments counts. The suite would compete with a real run, and pruning could pull a release out from under it.
+- **Two deploys at once** (a lock on `releases/.lock`).
+- **A `current` that isn't a symlink**, and tags that aren't `v` + digits, dots, letters, and dashes.
+
+`releases/<tag>` only ever holds a release that passed its suite on this box, so a rollback never lands on a half-extracted or failing one.
+
+## Cron
+
+bandy runs from `~/bandy`, so its state keeps its paths, and from `current`, so a deploy or rollback is all it takes to change what runs:
+
+```
+cd ~/bandy && current/ruby/bin/ruby current/bandy.rb >> logs/cron.log 2>&1
+```
+
+Keep the schedule the crontab already has. It's plain Ruby: the release's own `ruby`, by path, so cron's PATH doesn't matter. Bundler isn't involved at runtime. `package.sh` installs the gems in Bundler's standalone mode at build time, which writes `vendor/bundle/bundler/setup.rb`, a file that only puts the release's gems on Ruby's load path, and `bandy.rb` loads it. So nothing reads a Gemfile or a lockfile on the box, and a stale `~/bandy/Gemfile` from the rsync days is just a file.
+
+## Testing deploy.sh
+
+CI's `deploy-test` job runs it against this commit's tarball, from the `package` job, in a container shaped like the jukebox (runtime libraries, `curl`, no compiler). It bootstraps the way this README does, runs the cron line above as cron would (no PATH beyond `/usr/bin:/bin`, an empty `.env`, and no network at all, in a network namespace of its own) far enough to see bandy start its first stage, then runs every later deploy and rollback from `current/release/deploy.sh`, including against doctored copies: one byte changed, and one test made to fail. All of them come from `file://` through `BANDY_DEPLOY_BASE_URL`. **That variable is for tests only**; never set it on the jukebox. The https download from GitHub is tested on the box, by the first real deploy.

@@ -1,6 +1,9 @@
 #!/usr/bin/env ruby
 
 # dependencies
+# A release sets $LOAD_PATH from its own generated file, no Bundler; dev uses bundle exec.
+setup = File.expand_path('vendor/bundle/bundler/setup.rb', __dir__)
+require setup if File.exist?(setup)
 require 'dotenv/load'
 require 'date'
 require 'logger'
