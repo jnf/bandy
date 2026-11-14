@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 # dependencies
+ENV['BUNDLE_GEMFILE'] ||= File.expand_path('Gemfile', __dir__)
 require 'bundler/setup'
 require 'dotenv/load'
 require 'date'
