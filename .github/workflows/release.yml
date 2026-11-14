@@ -156,6 +156,15 @@ jobs:
           tar -xzf "artifact/$ASSET" -C "$DIR"
           ls -la "$DIR"
           cat "$DIR/REVISION"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: src
+      - name: The release carries this commit's deploy.sh, byte for byte
+        run: |
+          test -f "$DIR/release/deploy.sh" || { echo "no release/deploy.sh in $ASSET"; exit 1; }
+          cmp "$GITHUB_WORKSPACE/src/release/deploy.sh" "$DIR/release/deploy.sh"
+          echo "release/deploy.sh: $(sha256sum < "$DIR/release/deploy.sh" | cut -d' ' -f1)"
       - name: Suite, from the release, with the release's Ruby
         working-directory: ${{ env.DIR }}
         run: |
@@ -289,7 +298,9 @@ jobs:
           find .env Gemfile store logs downloads collection -type f -exec sha256sum {} + | sort > "$RUNNER_TEMP/state.before"
           cat > "$RUNNER_TEMP/checks.sh" <<'SH'
           set -euo pipefail
-          DEPLOY="$GITHUB_WORKSPACE/release/deploy.sh"
+          # The deploy.sh the deployed release carries, as the README runs it. The
+          # first deploy uses a copy extracted from the tarball (the bootstrap).
+          DEPLOY="$HOME/bandy/current/release/deploy.sh"
           # RUNNER_TEMP is the container path; the runner.temp expression is the host one.
           FIXTURES="file://$RUNNER_TEMP/fixtures"
           # Every deploy in this job comes from the fixtures, never from GitHub.
@@ -372,12 +383,17 @@ jobs:
           publish "$red"
           rm -rf "$fx"/tree-* "$fx/real" "$fx/sha.keep"
           ls -R "$fx"
-      - name: Deploy this commit's release
+      - name: Bootstrap, as the README does it, deploys this commit's release
         run: |
           . "$RUNNER_TEMP/checks.sh"
-          bash "$DEPLOY" "$TAG"
+          [ ! -e "$DEPLOY" ] || fail "a deploy.sh is already at $DEPLOY"
+          # The README's bootstrap: pull release/deploy.sh out of the tarball, run it once.
+          tar -xzf "$RUNNER_TEMP/fixtures/$TAG/bandy-$TAG-aarch64-linux.tar.gz" -C "$HOME/tmp" release/deploy.sh
+          bash "$HOME/tmp/release/deploy.sh" "$TAG"
+          rm -rf "$HOME/tmp/release"
           expect_current "$TAG"
           clean
+          cmp "$DEPLOY" "$GITHUB_WORKSPACE/release/deploy.sh" || fail "current/release/deploy.sh isn't this commit's"
           [ "$(ls releases)" = "$TAG" ] || fail "releases: $(ls releases)"
       - name: The cron line runs bandy from current, not the stale ~/bandy/Gemfile
         run: |
@@ -462,6 +478,7 @@ jobs:
       - name: Pruning keeps two, current and the one before
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          # Run from current (test.a), which prune keeps; it removes $TAG.
           bash "$DEPLOY" v0.0.0-test.b
           expect_current v0.0.0-test.b
           clean

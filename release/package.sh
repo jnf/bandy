@@ -28,8 +28,9 @@ sha=${GITHUB_SHA:-$(git -C "$root" rev-parse HEAD)}
 asset="bandy-${tag:-${sha:0:12}}-aarch64-linux.tar.gz"
 
 # What ships of bandy itself. test/ ships because the box runs the suite before
-# switching to a release.
-CODE=(api scripts test bandy.rb Gemfile Gemfile.lock .ruby-version)
+# switching to a release; release/deploy.sh ships so each release carries the
+# deploy.sh CI tested with it, run on the box as current/release/deploy.sh.
+CODE=(api scripts test bandy.rb Gemfile Gemfile.lock .ruby-version release/deploy.sh)
 
 echo "==> build deps"
 export DEBIAN_FRONTEND=noninteractive
@@ -42,7 +43,8 @@ stage=$(mktemp -d)
 echo "==> staging in $stage"
 tar -xzf "$ruby_tarball" -C "$stage"
 [ -x "$stage/ruby/bin/ruby" ] || { echo "no ruby/bin/ruby in $ruby_tarball" >&2; exit 1; }
-(cd "$root" && cp -a "${CODE[@]}" "$stage/")
+# --parents: release/deploy.sh lands at release/deploy.sh, not at the top.
+(cd "$root" && cp -a --parents "${CODE[@]}" "$stage/")
 {
   echo "sha=$sha"
   [ -z "$tag" ] || echo "tag=$tag"
