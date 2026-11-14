@@ -11,7 +11,11 @@
 #   bandy-<tag>-aarch64-linux.tar.gz          (bandy-<sha12>-... without a tag)
 #   bandy-<tag>-aarch64-linux.tar.gz.sha256   (sha256sum format)
 # The tarball has no top-level dir: extract it into the release dir, then
-#   cd <dir> && PATH="$PWD/ruby/bin:$PATH" ruby -S bundle exec ruby test/run.rb
+#   cd <dir> && ruby/bin/ruby test/run.rb
+# Bundler runs here, at build time, and nowhere else: the gems install in standalone
+# mode, which writes vendor/bundle/bundler/setup.rb, a file that only sets $LOAD_PATH
+# (by paths relative to itself). bandy.rb and test/run.rb load it, so the release
+# runs as plain ruby: no lockfile resolution, no BUNDLED WITH check, no Gemfile lookup.
 set -euo pipefail
 
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
@@ -50,20 +54,25 @@ tar -xzf "$ruby_tarball" -C "$stage"
   [ -z "$tag" ] || echo "tag=$tag"
 } > "$stage/REVISION"
 
-echo "==> gems: deployment mode, frozen lock, all groups, into vendor/bundle"
+echo "==> gems: standalone, deployment mode, frozen lock, all groups, into vendor/bundle"
 # Only the shipped Ruby, and nothing from the environment pointing elsewhere.
 unset RUBYOPT RUBYLIB GEM_HOME GEM_PATH BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_APP_CONFIG
 export PATH="$stage/ruby/bin:$PATH"
 (
   cd "$stage"
-  # Writes .bundle/config, which ships: the relative path is resolved against
-  # the Gemfile's dir, so the release finds its gems wherever it's extracted.
-  bundle config set --local deployment true
-  bundle config set --local path vendor/bundle
-  bundle install --jobs "$(nproc)"
+  # Settings by env, not .bundle/config: nothing at runtime reads Bundler's config.
+  # BUNDLE_VERSION=system keeps the shipped Ruby's own Bundler instead of installing
+  # the lockfile's BUNDLED WITH version and re-exec'ing into it.
+  export BUNDLE_DEPLOYMENT=true BUNDLE_PATH=vendor/bundle BUNDLE_VERSION=system
+  bundle install --standalone --jobs "$(nproc)"
   bundle check
 )
-cat "$stage/.bundle/config"
+[ -f "$stage/vendor/bundle/bundler/setup.rb" ] || { echo "no vendor/bundle/bundler/setup.rb" >&2; exit 1; }
+if compgen -G "$stage/vendor/bundle/ruby/*/gems/bundler-*" > /dev/null; then
+  echo "a second Bundler got vendored: $(echo "$stage"/vendor/bundle/ruby/*/gems/bundler-*)" >&2
+  exit 1
+fi
+echo "vendor/bundle/bundler/setup.rb: $(grep -c '^\$:.unshift' "$stage/vendor/bundle/bundler/setup.rb") load paths"
 
 # ELF shared objects under ruby/ and vendor/bundle: libruby and every extension.
 shared_objects() {
@@ -75,7 +84,7 @@ shared_objects() {
 
 pack() {
   tar -C "$stage" --owner=0 --group=0 --numeric-owner --sort=name \
-    -czf "$1" ruby vendor .bundle REVISION "${CODE[@]}"
+    -czf "$1" ruby vendor REVISION "${CODE[@]}"
 }
 
 echo "==> unstripped, for the record"
