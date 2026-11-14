@@ -79,8 +79,8 @@ bandy runs from `~/bandy`, so its state keeps its paths, and from `current`, so 
 cd ~/bandy && current/ruby/bin/ruby current/bandy.rb >> logs/cron.log 2>&1
 ```
 
-Keep the schedule the crontab already has. `bandy.rb` finds the Gemfile beside it, so a stale `~/bandy/Gemfile` from the rsync days doesn't get in the way.
+Keep the schedule the crontab already has. It's plain Ruby: the release's own `ruby`, by path, so cron's PATH doesn't matter. Bundler isn't involved at runtime. `package.sh` installs the gems in Bundler's standalone mode at build time, which writes `vendor/bundle/bundler/setup.rb`, a file that only puts the release's gems on Ruby's load path, and `bandy.rb` loads it. So nothing reads a Gemfile or a lockfile on the box, and a stale `~/bandy/Gemfile` from the rsync days is just a file.
 
 ## Testing deploy.sh
 
-CI's `deploy-test` job runs it against this commit's tarball, from the `package` job, in a container shaped like the jukebox (runtime libraries, `curl`, no compiler). It bootstraps the way this README does, then runs every later deploy and rollback from `current/release/deploy.sh`, including against doctored copies: one byte changed, and one test made to fail. All of them come from `file://` through `BANDY_DEPLOY_BASE_URL`. **That variable is for tests only**; never set it on the jukebox. The https download from GitHub is tested on the box, by the first real deploy.
+CI's `deploy-test` job runs it against this commit's tarball, from the `package` job, in a container shaped like the jukebox (runtime libraries, `curl`, no compiler). It bootstraps the way this README does, runs the cron line above as cron would (no PATH beyond `/usr/bin:/bin`, an empty `.env`, and no network at all, in a network namespace of its own) far enough to see bandy start its first stage, then runs every later deploy and rollback from `current/release/deploy.sh`, including against doctored copies: one byte changed, and one test made to fail. All of them come from `file://` through `BANDY_DEPLOY_BASE_URL`. **That variable is for tests only**; never set it on the jukebox. The https download from GitHub is tested on the box, by the first real deploy.
