@@ -282,6 +282,8 @@ jobs:
           cat > "$RUNNER_TEMP/checks.sh" <<'SH'
           set -euo pipefail
           DEPLOY="$GITHUB_WORKSPACE/release/deploy.sh"
+          # RUNNER_TEMP is the container path; the runner.temp expression is the host one.
+          FIXTURES="file://$RUNNER_TEMP/fixtures"
           cd "$HOME/bandy"
           target() { readlink "$HOME/bandy/current" || echo "(none)"; }
           fail() { echo "FAIL: $*"; exit 1; }
@@ -379,28 +381,25 @@ jobs:
           rm -rf "$fx"/tree-* "$fx/real" "$fx/real.tar.gz"
           ls -R "$fx"
       - name: "Control: a tarball with one byte changed fails the sha256 check, current stays"
-        env:
-          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           expect_refusal "FAILED at step: 2 sha256" v0.0.0-test.badbyte
           grep -q "sha256 mismatch" "$RUNNER_TEMP/out" || fail "no sha256 mismatch"
           [ ! -e releases/v0.0.0-test.badbyte ] || fail "badbyte release installed"
           expect_current "$TAG"
       - name: "Control: a release whose suite fails leaves current alone"
-        env:
-          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           expect_refusal "FAILED at step: 4 suite" v0.0.0-test.redsuite
           grep -q "deliberately red" "$RUNNER_TEMP/out" || fail "the red test didn't run"
           [ ! -e releases/v0.0.0-test.redsuite ] || fail "red release installed"
           expect_current "$TAG"
       - name: A second deploy, then a rollback flips current back
-        env:
-          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           bash "$DEPLOY" v0.0.0-test.a
           expect_current v0.0.0-test.a
           clean
@@ -410,10 +409,9 @@ jobs:
           clean
           [ "$(ls releases | xargs)" = "$TAG v0.0.0-test.a" ] || fail "releases: $(ls releases | xargs)"
       - name: deploy.sh refuses while bandy runs, and only bandy counts
-        env:
-          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           # bandy as cron starts it: ruby, with current/bandy.rb in its argv.
           current/ruby/bin/ruby -e 'sleep 120' current/bandy.rb &
           bandy=$!
@@ -432,10 +430,9 @@ jobs:
           kill "$other"
           wait "$other" || true
       - name: Pruning keeps two, current and the one before
-        env:
-          BANDY_DEPLOY_BASE_URL: file://${{ runner.temp }}/fixtures
         run: |
           . "$RUNNER_TEMP/checks.sh"
+          export BANDY_DEPLOY_BASE_URL="$FIXTURES"
           bash "$DEPLOY" v0.0.0-test.b
           expect_current v0.0.0-test.b
           clean
