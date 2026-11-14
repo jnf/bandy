@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 # dependencies
+require 'bundler/setup'
 require 'dotenv/load'
 require 'date'
 require 'logger'
