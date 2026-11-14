@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+    # Let new releases age a week before proposing them; security updates skip the wait.
+    cooldown:
+      default-days: 7
+    # One PR per week for routine bumps, not one per gem.
+    groups:
+      gems:
+        patterns: ["*"]
