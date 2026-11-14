@@ -1,0 +1,83 @@
+name: release
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ruby:
+    # aarch64 runner, Trixie userland: the jukebox's arch, glibc, and sonames
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    container:
+      image: debian@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1 # trixie-20261027, multi-arch index
+    outputs:
+      artifact: ${{ steps.meta.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: meta
+        run: |
+          version=$(tr -d '[:space:]' < .ruby-version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ruby-build=$(sed -n 's/^RUBY_BUILD_SHA=//p' release/build-ruby.sh)" >> "$GITHUB_OUTPUT"
+          echo "artifact=ruby-$version-aarch64-linux.tar.gz" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: dist/${{ steps.meta.outputs.artifact }}
+          key: ruby-${{ steps.meta.outputs.version }}-aarch64-linux-rb${{ steps.meta.outputs.ruby-build }}-${{ hashFiles('.ruby-version', 'release/build-ruby.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash release/build-ruby.sh dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.meta.outputs.artifact }}
+          path: dist/${{ steps.meta.outputs.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0 # already gzipped
+
+  ruby-probe:
+    needs: ruby
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    container:
+      image: debian@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1 # trixie-20261027, multi-arch index
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runtime libraries only
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            libssl3t64 libyaml-0-2 zlib1g libffi8 libgmp10
+      - name: No compiler
+        run: |
+          for tool in cc gcc c++ g++ clang make ld as; do
+            if command -v "$tool"; then echo "compiler present: $tool"; exit 1; fi
+          done
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.ruby.outputs.artifact }}
+          path: artifact
+      - name: Extract somewhere the build never was
+        run: |
+          mkdir -p /srv/relocated
+          tar -xzf "artifact/${{ needs.ruby.outputs.artifact }}" -C /srv/relocated
+          ls -l /srv/relocated/ruby
+      - name: Runtime packages the build links against
+        run: |
+          { find /srv/relocated/ruby -type f \( -name '*.so*' -o -path '*/bin/ruby' \) -exec ldd {} + 2>/dev/null || true; } \
+            | awk '$3 ~ /^\// { print $3 }' | xargs -r readlink -f | sort -u | grep -v '^/srv/relocated/' \
+            | xargs -r dpkg -S | cut -d: -f1 | sort -u
+      - run: bash release/probe-ruby.sh /srv/relocated/ruby
