@@ -24,7 +24,8 @@ module Outcome
       at_exit { write if Process.pid == @pid }
     end
 
-    # Name the stage about to run, in the snake_case of its stage log.
+    # Name the stage about to run: its class name in snake_case (SyncCollection
+    # is 'sync_collection'), whatever its own log file is called.
     def stage=(name)
       @stage = name.to_s
     end

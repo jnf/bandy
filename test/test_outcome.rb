@@ -303,7 +303,7 @@ class TestOutcome < Minitest::Test
     assert_equal 'Outcome.install', bandy_code[1]
   end
 
-  def test_bandy_records_each_stage_by_its_log_name_right_before_running_it
+  def test_bandy_records_each_stage_by_its_class_name_right_before_running_it
     code = bandy_code.map(&:strip).reject { |l| l.start_with?('#') }
     snake = ->(name) { name.gsub(/([a-z])([A-Z])/, '\1_\2').downcase }
     recorded = []
