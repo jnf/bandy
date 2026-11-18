@@ -8,6 +8,7 @@ require_relative '../scripts/outcome'
 
 class TestOutcome < Minitest::Test
   OUTCOME_PATH = File.expand_path('../scripts/outcome.rb', __dir__)
+  BANDY_PATH = File.expand_path('../bandy.rb', __dir__)
   TS = /\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d/
 
   def setup
@@ -263,5 +264,54 @@ class TestOutcome < Minitest::Test
     bad = run_driver('raise')
     assert_equal 1, bad.status.exitstatus
     assert_includes bad.err, 'boom from a stage'
+  end
+
+  # --- bandy.rb's wiring ---
+  # bandy.rb can't run here (it would call Bandcamp), so pin what its source has to
+  # keep true instead.
+
+  def bandy_code
+    File.readlines(BANDY_PATH, chomp: true, encoding: 'utf-8').reject { |l| l.strip.empty? || l.start_with?('#') }
+  end
+
+  def test_bandy_installs_the_handler_before_any_other_require
+    assert_match(%r{\Arequire_relative ['"]scripts/outcome['"]\z}, bandy_code[0])
+    assert_equal 'Outcome.install', bandy_code[1]
+  end
+
+  def test_bandy_records_each_stage_by_its_log_name_right_before_running_it
+    code = bandy_code
+    pairs = code.each_cons(2).filter_map do |a, b|
+      stage = a[/\AOutcome\.stage = '(\w+)'\z/, 1]
+      klass = b[/\A(\w+)\.new\.run\z/, 1]
+      [stage, klass] if stage && klass
+    end
+    snake = ->(name) { name.gsub(/([a-z])([A-Z])/, '\1_\2').downcase }
+    assert_equal %w[sync_collection enrich_items queue_items download_items unpack_items], pairs.map(&:first)
+    pairs.each { |stage, klass| assert_equal stage, snake.call(klass) }
+    assert_equal pairs.size, code.count { |l| l.end_with?('.new.run') }, 'every stage must be recorded'
+  end
+
+  def test_bandy_marks_success_only_after_the_last_stage
+    code = bandy_code
+    assert_match(/\AOutcome\.succeed\(/, code.last)
+    assert_equal 1, code.count { |l| l.start_with?('Outcome.succeed') }
+  end
+
+  # bandy.rb loads outcome.rb by require_relative, then globs scripts/*.rb, which
+  # reaches it again. Lay out a copy the way bandy is laid out and do both.
+  def test_the_scripts_glob_reaching_outcome_again_registers_no_second_handler
+    FileUtils.mkdir_p(File.join(@tmpdir, 'scripts'))
+    FileUtils.cp(OUTCOME_PATH, File.join(@tmpdir, 'scripts', 'outcome.rb'))
+    File.write(File.join(@tmpdir, 'probe.rb'), <<~RUBY)
+      require_relative "scripts/outcome"
+      Outcome.install
+      Dir[File.join(__dir__, "scripts", "*.rb")].each { |file| require file }
+      print $LOADED_FEATURES.count { |f| f.end_with?("scripts/outcome.rb") }
+    RUBY
+    pid = Process.spawn(RbConfig.ruby, File.join(@tmpdir, "probe.rb"), chdir: @tmpdir, out: File.join(@tmpdir, "loaded.txt"))
+    Process.wait(pid)
+    assert_equal "1", File.read(File.join(@tmpdir, "loaded.txt"))
+    assert_equal 1, log_lines.size
   end
 end
