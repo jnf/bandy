@@ -220,7 +220,12 @@ jobs:
           ruby/bin/ruby -e '
             dir = Dir.pwd
             src = File.read("bandy.rb", encoding: "UTF-8") # no locale in the container
+            # The outcome handler would append to logs/bandy.log at exit; this check runs no pipeline.
+            src.match?(/^Outcome\.install$/) or abort "bandy.rb: no Outcome.install to disarm"
+            src = src.sub(/^Outcome\.install\n/, "")
             cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
+            # The pipeline opens ./store just before its first stage; a release dir has no store/.
+            cut = src.index(/^store = PStore\.new/) || cut
             eval(src[0...cut], TOPLEVEL_BINDING, File.join(dir, "bandy.rb"), 1)
             %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems
                HTTParty Nokogiri Zip Dotenv PStore].each { Object.const_get(_1) }
@@ -470,6 +475,9 @@ jobs:
           current/ruby/bin/ruby -e '
             path = File.expand_path("current/bandy.rb")
             src = File.read(path, encoding: "UTF-8")
+            # The outcome handler would append to logs/bandy.log at exit, and this run must leave state alone.
+            src.match?(/^Outcome\.install$/) or abort "bandy.rb: no Outcome.install to disarm"
+            src = src.sub(/^Outcome\.install\n/, "")
             cut = src.index(/^SyncCollection\.new\.run/) or abort "bandy.rb: no pipeline start to stop at"
             eval(src[0...cut], TOPLEVEL_BINDING, path, 1)
             %w[SyncCollection EnrichItems QueueItems DownloadItems UnpackItems HTTParty Nokogiri Zip Dotenv].each { Object.const_get(_1) }
