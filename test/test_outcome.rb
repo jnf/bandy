@@ -85,8 +85,9 @@ class TestOutcome < Minitest::Test
     assert_equal({ unpacked: 1, failed: 1, retrying: 0 }, Outcome.counts({}, { 'n1' => :unpacked, 'n2' => :failed }))
   end
 
-  # DownloadItems attempts every :queued item and UnpackItems every :downloaded one,
-  # so any still in those states at the end failed this run and will be tried again.
+  # DownloadItems attempts every :queued item that's still fresh, and UnpackItems
+  # every :downloaded one with a zip path, so any still in those states at the end
+  # failed this run and will be tried again.
   def test_counts_retrying_is_every_item_left_queued_or_downloaded
     before = { 'a' => :queued, 'b' => :queued, 'c' => :downloaded, 'd' => :ready }
     after  = { 'a' => :queued, 'b' => :queued, 'c' => :downloaded, 'd' => :ready }

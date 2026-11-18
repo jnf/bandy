@@ -75,9 +75,10 @@ module Outcome
 
     # What this run did: items that reached :unpacked or :failed since before (an
     # item already in that state beforehand isn't this run's work), and how many
-    # are still to retry. DownloadItems attempts every :queued item and UnpackItems
-    # every :downloaded one, so any left in those states at the end failed this
-    # run and will be tried again, wherever they started. The other way an item
+    # are still to retry. DownloadItems attempts every :queued item that's still fresh,
+    # and UnpackItems every :downloaded one with a zip path, so any left in those
+    # states at the end failed this run and will be tried again, wherever they
+    # started. The other way an item
     # gets retried: DownloadItems moves a stale :queued item back to :ready without
     # an attempt, and UnpackItems resets a corrupt zip's :downloaded item to :ready.
     # Those end :ready, so they only show as :queued/:downloaded before and :ready
