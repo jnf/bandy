@@ -10,6 +10,9 @@
 module Outcome
   LOG_PATH = File.join('logs', 'bandy.log')
 
+  # States a stage attempts every run; an item still in one afterwards will be retried.
+  RETRYING = %i[queued downloaded].freeze
+
   @installed ||= false
 
   class << self
@@ -26,8 +29,8 @@ module Outcome
       @stage = name.to_s
     end
 
-    # Mark the run good. counts is { unpacked: N, failed: M }, or nil when they
-    # couldn't be worked out (the run still succeeded).
+    # Mark the run good. counts is { unpacked: N, failed: M, retrying: K }, or nil
+    # when they couldn't be worked out (the run still succeeded).
     def succeed(counts = nil)
       @success = true
       @counts = counts
@@ -38,7 +41,7 @@ module Outcome
       ts = now.strftime('%Y-%m-%dT%H:%M:%S%:z')
       if @success
         return "#{ts} ok" unless @counts
-        "#{ts} ok unpacked=#{@counts[:unpacked]} failed=#{@counts[:failed]}"
+        "#{ts} ok unpacked=#{@counts[:unpacked]} failed=#{@counts[:failed]} retrying=#{@counts[:retrying]}"
       else
         "#{ts} failed #{@stage || 'load'}"
       end
@@ -65,14 +68,18 @@ module Outcome
       nil
     end
 
-    # What this run did: items that reached :unpacked or :failed since before.
-    # An item already in that state beforehand isn't this run's work. nil if
-    # either snapshot is missing.
+    # What this run did: items that reached :unpacked or :failed since before (an
+    # item already in that state beforehand isn't this run's work), and how many
+    # are still to retry. DownloadItems attempts every :queued item and UnpackItems
+    # every :downloaded one, so any left in those states at the end failed this
+    # run and will be tried again, wherever they started. nil if either snapshot
+    # is missing.
     def counts(before, after)
       return nil unless before && after
       {
         unpacked: after.count { |key, state| state == :unpacked && before[key] != :unpacked },
-        failed: after.count { |key, state| state == :failed && before[key] != :failed }
+        failed: after.count { |key, state| state == :failed && before[key] != :failed },
+        retrying: after.count { |_key, state| RETRYING.include?(state) }
       }
     end
   end

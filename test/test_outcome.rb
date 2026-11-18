@@ -37,8 +37,8 @@ class TestOutcome < Minitest::Test
   # --- Line format ---
 
   def test_ok_line_with_counts
-    Outcome.succeed({ unpacked: 3, failed: 1 })
-    assert_match(/\A#{TS} ok unpacked=3 failed=1\z/, Outcome.line)
+    Outcome.succeed({ unpacked: 3, failed: 1, retrying: 2 })
+    assert_match(/\A#{TS} ok unpacked=3 failed=1 retrying=2\z/, Outcome.line)
   end
 
   def test_ok_line_without_counts_when_they_could_not_be_computed
@@ -58,7 +58,7 @@ class TestOutcome < Minitest::Test
 
   def test_failed_line_carries_no_counts
     Outcome.stage = 'unpack_items'
-    Outcome.instance_variable_set(:@counts, { unpacked: 2, failed: 0 })
+    Outcome.instance_variable_set(:@counts, { unpacked: 2, failed: 0, retrying: 1 })
     assert_match(/\A#{TS} failed unpack_items\z/, Outcome.line)
   end
 
@@ -72,17 +72,41 @@ class TestOutcome < Minitest::Test
   def test_counts_new_unpacked_and_failed
     before = { 'a' => :downloaded, 'b' => :downloaded, 'c' => :ready }
     after  = { 'a' => :unpacked, 'b' => :failed, 'c' => :ready }
-    assert_equal({ unpacked: 1, failed: 1 }, Outcome.counts(before, after))
+    assert_equal({ unpacked: 1, failed: 1, retrying: 0 }, Outcome.counts(before, after))
   end
 
   def test_counts_ignores_items_already_failed_or_unpacked_before
     before = { 'old_bad' => :failed, 'old_good' => :unpacked }
     after  = { 'old_bad' => :failed, 'old_good' => :unpacked }
-    assert_equal({ unpacked: 0, failed: 0 }, Outcome.counts(before, after))
+    assert_equal({ unpacked: 0, failed: 0, retrying: 0 }, Outcome.counts(before, after))
   end
 
   def test_counts_includes_items_that_first_appear_in_a_final_state
-    assert_equal({ unpacked: 1, failed: 1 }, Outcome.counts({}, { 'n1' => :unpacked, 'n2' => :failed }))
+    assert_equal({ unpacked: 1, failed: 1, retrying: 0 }, Outcome.counts({}, { 'n1' => :unpacked, 'n2' => :failed }))
+  end
+
+  # DownloadItems attempts every :queued item and UnpackItems every :downloaded one,
+  # so any still in those states at the end failed this run and will be tried again.
+  def test_counts_retrying_is_every_item_left_queued_or_downloaded
+    before = { 'a' => :queued, 'b' => :queued, 'c' => :downloaded, 'd' => :ready }
+    after  = { 'a' => :queued, 'b' => :queued, 'c' => :downloaded, 'd' => :ready }
+    assert_equal({ unpacked: 0, failed: 0, retrying: 3 }, Outcome.counts(before, after))
+  end
+
+  def test_counts_retrying_ignores_where_the_item_started
+    before = { 'a' => :ready, 'b' => :queued }
+    after  = { 'a' => :queued, 'b' => :downloaded }
+    assert_equal({ unpacked: 0, failed: 0, retrying: 2 }, Outcome.counts(before, after))
+  end
+
+  def test_counts_an_item_that_goes_all_the_way_through_counts_only_as_unpacked
+    before = { 'a' => :queued }
+    after  = { 'a' => :unpacked }
+    assert_equal({ unpacked: 1, failed: 0, retrying: 0 }, Outcome.counts(before, after))
+  end
+
+  def test_counts_an_already_failed_item_counts_nowhere
+    assert_equal({ unpacked: 0, failed: 0, retrying: 0 }, Outcome.counts({ 'a' => :failed }, { 'a' => :failed }))
   end
 
   def test_counts_nil_when_either_snapshot_is_missing
@@ -133,7 +157,7 @@ class TestOutcome < Minitest::Test
     when 'ok'
       FakeStage.new('sync_collection').run
       FakeStage.new('unpack_items').run
-      Outcome.succeed({ unpacked: 2, failed: 1 })
+      Outcome.succeed({ unpacked: 2, failed: 1, retrying: 4 })
     when 'ok_no_counts'
       FakeStage.new('unpack_items').run
       Outcome.succeed(nil)
@@ -200,7 +224,7 @@ class TestOutcome < Minitest::Test
     result = run_driver('ok')
     assert result.status.success?, result.err
     assert_equal 1, log_lines.size
-    assert_match(/\A#{TS} ok unpacked=2 failed=1\z/, log_lines.first)
+    assert_match(/\A#{TS} ok unpacked=2 failed=1 retrying=4\z/, log_lines.first)
   end
 
   def test_success_without_counts_writes_a_bare_ok
@@ -247,7 +271,7 @@ class TestOutcome < Minitest::Test
     run_driver('ok')
     run_driver('raise')
     assert_equal 2, log_lines.size
-    assert_match(/ ok unpacked=2 failed=1\z/, log_lines[0])
+    assert_match(/ ok unpacked=2 failed=1 retrying=4\z/, log_lines[0])
     assert_match(/ failed download_items\z/, log_lines[1])
   end
 
