@@ -304,16 +304,18 @@ class TestOutcome < Minitest::Test
   end
 
   def test_bandy_records_each_stage_by_its_log_name_right_before_running_it
-    code = bandy_code
-    pairs = code.each_cons(2).filter_map do |a, b|
-      stage = a[/\AOutcome\.stage = '(\w+)'\z/, 1]
-      klass = b[/\A(\w+)\.new\.run\z/, 1]
-      [stage, klass] if stage && klass
-    end
+    code = bandy_code.map(&:strip).reject { |l| l.start_with?('#') }
     snake = ->(name) { name.gsub(/([a-z])([A-Z])/, '\1_\2').downcase }
-    assert_equal %w[sync_collection enrich_items queue_items download_items unpack_items], pairs.map(&:first)
-    pairs.each { |stage, klass| assert_equal stage, snake.call(klass) }
-    assert_equal pairs.size, code.count { |l| l.end_with?('.new.run') }, 'every stage must be recorded'
+    recorded = []
+    code.each_with_index do |line, i|
+      next unless line.include?('.run')
+      stage = code[i - 1][/\AOutcome\.stage = '(\w+)'\z/, 1] if i.positive?
+      assert stage, "#{line.inspect} must be immediately preceded by an Outcome.stage line"
+      klass = line[/\A(\w+)\.new/, 1]
+      assert_equal stage, snake.call(klass), "#{line.inspect} is recorded as #{stage}" if klass
+      recorded << stage
+    end
+    assert_equal %w[sync_collection enrich_items queue_items download_items unpack_items], recorded
   end
 
   def test_bandy_marks_success_only_after_the_last_stage
