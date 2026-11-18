@@ -99,6 +99,29 @@ class TestOutcome < Minitest::Test
     assert_equal({ unpacked: 0, failed: 0, retrying: 2 }, Outcome.counts(before, after))
   end
 
+  # A stale :queued item (CDN URL expired) is sent back to :ready by DownloadItems
+  # without an attempt; a corrupt zip sends :downloaded back to :ready. Both are
+  # retries that the end state alone can't see.
+  def test_counts_retrying_includes_a_queued_item_sent_back_to_ready
+    assert_equal({ unpacked: 0, failed: 0, retrying: 1 }, Outcome.counts({ 'a' => :queued }, { 'a' => :ready }))
+  end
+
+  def test_counts_retrying_includes_a_downloaded_item_sent_back_to_ready
+    assert_equal({ unpacked: 0, failed: 0, retrying: 1 }, Outcome.counts({ 'a' => :downloaded }, { 'a' => :ready }))
+  end
+
+  def test_counts_retrying_ignores_a_ready_item_nothing_touched
+    assert_equal({ unpacked: 0, failed: 0, retrying: 0 }, Outcome.counts({ 'a' => :ready }, { 'a' => :ready }))
+  end
+
+  def test_counts_retrying_includes_a_ready_item_queued_this_run_whose_download_failed
+    assert_equal({ unpacked: 0, failed: 0, retrying: 1 }, Outcome.counts({ 'a' => :ready }, { 'a' => :queued }))
+  end
+
+  def test_counts_retrying_ignores_a_new_item_that_ends_ready
+    assert_equal({ unpacked: 0, failed: 0, retrying: 0 }, Outcome.counts({}, { 'a' => :ready }))
+  end
+
   def test_counts_an_item_that_goes_all_the_way_through_counts_only_as_unpacked
     before = { 'a' => :queued }
     after  = { 'a' => :unpacked }

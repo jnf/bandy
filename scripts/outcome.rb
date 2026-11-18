@@ -10,8 +10,12 @@
 module Outcome
   LOG_PATH = File.join('logs', 'bandy.log')
 
-  # States a stage attempts every run; an item still in one afterwards will be retried.
+  # An item stuck in download or unpack is retried the next run, and shows up in one
+  # of two ways. It stays in the state the stage works from (RETRYING), or the stage
+  # sends it back to :ready to be queued again (a stale CDN URL, a corrupt zip);
+  # SENT_BACK_FROM are the states it can be sent back from.
   RETRYING = %i[queued downloaded].freeze
+  SENT_BACK_FROM = RETRYING
 
   @installed ||= false
 
@@ -73,14 +77,17 @@ module Outcome
     # item already in that state beforehand isn't this run's work), and how many
     # are still to retry. DownloadItems attempts every :queued item and UnpackItems
     # every :downloaded one, so any left in those states at the end failed this
-    # run and will be tried again, wherever they started. nil if either snapshot
-    # is missing.
+    # run and will be tried again, wherever they started. The other way an item
+    # gets retried: DownloadItems moves a stale :queued item back to :ready without
+    # an attempt, and UnpackItems resets a corrupt zip's :downloaded item to :ready.
+    # Those end :ready, so they only show as :queued/:downloaded before and :ready
+    # after. nil if either snapshot is missing.
     def counts(before, after)
       return nil unless before && after
       {
         unpacked: after.count { |key, state| state == :unpacked && before[key] != :unpacked },
         failed: after.count { |key, state| state == :failed && before[key] != :failed },
-        retrying: after.count { |_key, state| RETRYING.include?(state) }
+        retrying: after.count { |key, state| RETRYING.include?(state) || (state == :ready && SENT_BACK_FROM.include?(before[key])) }
       }
     end
   end
