@@ -322,6 +322,19 @@ class TestOutcome < Minitest::Test
     assert_equal 1, code.count { |l| l.start_with?('Outcome.succeed') }
   end
 
+  # The guard itself: a second install in the same process must not add a second handler.
+  def test_installing_twice_in_one_process_writes_one_line
+    File.write(File.join(@tmpdir, 'twice.rb'), <<~RUBY)
+      require #{OUTCOME_PATH.inspect}
+      Outcome.install
+      Outcome.install
+      Outcome.succeed(nil)
+    RUBY
+    pid = Process.spawn(RbConfig.ruby, File.join(@tmpdir, 'twice.rb'), chdir: @tmpdir)
+    Process.wait(pid)
+    assert_equal 1, log_lines.size
+  end
+
   # bandy.rb loads outcome.rb by require_relative, then globs scripts/*.rb, which
   # reaches it again. Lay out a copy the way bandy is laid out and do both.
   def test_the_scripts_glob_reaching_outcome_again_registers_no_second_handler
