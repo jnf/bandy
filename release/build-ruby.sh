@@ -8,9 +8,9 @@
 # Output: <out-dir>/ruby-<version>-aarch64-linux.tar.gz, one top-level ruby/ dir.
 set -euo pipefail
 
-# ruby-build v20261023, the tag the jukebox built 4.0.9 with. ruby-build checks
+# ruby-build v20261119, the first tag with 4.0.10. ruby-build checks
 # Ruby's source tarball against its own sha256 table, so pinning this pins Ruby.
-RUBY_BUILD_SHA=b6a92c15f0df872047c74f7dfa0b92dfd4de8a92
+RUBY_BUILD_SHA=b91ffe95bf6350b8fce3170585c442f20b62619f
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 version=$(tr -d '[:space:]' < "$root/.ruby-version")
