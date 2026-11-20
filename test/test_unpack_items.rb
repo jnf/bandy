@@ -265,6 +265,40 @@ class TestUnpackItems < Minitest::Test
     assert_equal ["AC-DC", "AC-DC/Back-In Black"], library_dirs
   end
 
+  # A name over ext4's 255 bytes is cut to fit, on a grapheme boundary: here
+  # "e" + combining acute is one 3-byte grapheme, so the cut keeps whole ones.
+  def test_long_names_are_cut_to_whole_graphemes
+    long = "x" + "é" * 100 # 301 bytes
+    result = unpack_album(long, long)
+
+    want = "x" + "é" * 84 # 253 bytes; one more grapheme would be 256
+    assert_equal File.join(ENV['UNPACK_PATH'], want, want), result[:unpacked_path]
+    assert_equal :unpacked, result[:state]
+    assert File.exist?(File.join(result[:unpacked_path], "track01.mp3"))
+  end
+
+  # One grapheme can outgrow the limit on its own (stacked combining marks);
+  # then the cut falls back to characters rather than leaving nothing. Checked
+  # on the name alone: APFS refuses a run of combining marks this long (EILSEQ)
+  # where ext4 takes it, so a real mkdir would test the laptop, not the cut.
+  def test_a_single_grapheme_over_the_limit_is_cut_to_characters
+    zalgo = "e" + "́" * 200 # one grapheme, 401 bytes
+    name = UnpackItems.new(store: @store).send(:safe_name, zalgo)
+    assert_equal "e" + "́" * 127, name # 255 bytes
+  end
+
+  def test_a_long_track_title_leaves_room_for_the_extension
+    src = File.join(@tmpdir, "song.mp3")
+    File.write(src, "song data")
+    seed_store("t123" => item(local_path: src,
+                              digital_item: { "artist" => "Test Artist", "title" => "y" * 300, "download_type" => "t" }))
+    UnpackItems.new(store: @store).run
+
+    dir = File.join(ENV['UNPACK_PATH'], "Test Artist", "y" * 255)
+    assert_equal :unpacked, stored_state("t123")
+    assert_equal "song data", File.read(File.join(dir, "y" * 251 + ".mp3"))
+  end
+
   # The guarantee under the rewrite: if it ever lets a separator or a dot name
   # through, the item is refused and nothing is written.
   def test_album_dir_is_refused_if_the_name_rewrite_fails
@@ -286,6 +320,24 @@ class TestUnpackItems < Minitest::Test
 
     assert_equal :failed, stored_state("a123")
     assert_equal [], library_dirs
+  end
+
+  # A filesystem error making the album dir is one item's problem: the item
+  # stays :downloaded and the items after it still unpack.
+  def test_album_dir_the_filesystem_refuses_fails_only_that_item
+    uncapped = Class.new(UnpackItems) { def safe_name(name) = name.to_s }
+    make_zip(item[:local_path])
+    other_zip = File.join(@tmpdir, "other.zip")
+    make_zip(other_zip)
+    seed_store(
+      "a123" => album_named("Test Artist", "x" * 300),
+      "a456" => item(local_path: other_zip)
+    )
+    uncapped.new(store: @store).run
+
+    assert_equal :downloaded, stored_state("a123")
+    assert_equal :unpacked, stored_state("a456")
+    assert File.exist?(File.join(expected_extract_dir, "track01.mp3"))
   end
 
   # --- Single-track downloads (download_type "t") share the album success path ---
