@@ -58,7 +58,9 @@ class UnpackItems
           # Each branch does only its own work; success handling is shared below
           if item[:digital_item]["download_type"] == 't' # tracks don't get unpacked, they get copied
             ext = item[:local_path].split('.').last
-            dest_file = File.join(extract_dir,"#{title}.#{ext}")
+            # The filename is the title plus an extension, so it gets the extension's bytes less
+            file_title = safe_name(item[:digital_item]["title"], NAME_MAX - ".#{ext}".bytesize)
+            dest_file = File.join(extract_dir, "#{file_title}.#{ext}")
             log.info("#{item_key} is a track; copying to #{dest_file}")
             FileUtils.cp(item[:local_path], dest_file)
           else # Extract zip file
@@ -131,10 +133,30 @@ class UnpackItems
   # Artist and title come from Bandcamp, and most odd ones are honest: a split
   # release named "A / B", a band called "..". Rewrite each into one directory
   # name: "/" becomes "-" (Bandcamp's own zip names do the same), the ends are
-  # trimmed, and a name that's only a dot reference or nothing becomes "_".
-  def safe_name(name)
-    rewritten = name.to_s.tr('/', '-').strip
+  # trimmed, a name too long for the filesystem is cut to fit, and a name that's
+  # only a dot reference or nothing becomes "_".
+  def safe_name(name, max_bytes = NAME_MAX)
+    rewritten = fit(name.to_s.tr('/', '-').strip, max_bytes).strip
     ['', '.', '..'].include?(rewritten) ? '_' : rewritten
+  end
+
+  # ext4 caps one path component at 255 bytes, and Bandcamp titles can be longer
+  # (a 499-byte title of stacked combining marks, 2026-11-20). Cut on a grapheme
+  # boundary so no character loses its marks; a single grapheme over the limit
+  # is cut on a character boundary instead.
+  NAME_MAX = 255
+
+  def fit(name, max_bytes)
+    return name if name.bytesize <= max_bytes
+    [:each_grapheme_cluster, :each_char].each do |unit|
+      out = +''
+      name.public_send(unit) do |piece|
+        break if out.bytesize + piece.bytesize > max_bytes
+        out << piece
+      end
+      return out unless out.empty?
+    end
+    ''
   end
 
   # The guarantee under safe_name: the album lands exactly two levels under
