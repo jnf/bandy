@@ -52,8 +52,9 @@ class UnpackItems
           next
         end
 
-        FileUtils.mkdir_p(extract_dir)
         begin
+          # Inside the rescue: a name the filesystem won't take fails this item, not the run
+          FileUtils.mkdir_p(extract_dir)
           # Each branch does only its own work; success handling is shared below
           if item[:digital_item]["download_type"] == 't' # tracks don't get unpacked, they get copied
             ext = item[:local_path].split('.').last

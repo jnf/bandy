@@ -288,6 +288,24 @@ class TestUnpackItems < Minitest::Test
     assert_equal [], library_dirs
   end
 
+  # A filesystem error making the album dir is one item's problem: the item
+  # stays :downloaded and the items after it still unpack.
+  def test_album_dir_the_filesystem_refuses_fails_only_that_item
+    uncapped = Class.new(UnpackItems) { def safe_name(name) = name.to_s }
+    make_zip(item[:local_path])
+    other_zip = File.join(@tmpdir, "other.zip")
+    make_zip(other_zip)
+    seed_store(
+      "a123" => album_named("Test Artist", "x" * 300),
+      "a456" => item(local_path: other_zip)
+    )
+    uncapped.new(store: @store).run
+
+    assert_equal :downloaded, stored_state("a123")
+    assert_equal :unpacked, stored_state("a456")
+    assert File.exist?(File.join(expected_extract_dir, "track01.mp3"))
+  end
+
   # --- Single-track downloads (download_type "t") share the album success path ---
 
   def track_item(overrides = {})
