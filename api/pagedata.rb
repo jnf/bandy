@@ -11,7 +11,12 @@ module API
     end
 
     def fetch
-      html = Nokogiri::HTML5::Document.parse(get.body)
+      resp = get
+      # An error page still carries a #pagedata blob (page chrome, no content),
+      # so the status is the only thing that says the page isn't there.
+      raise StandardError, "HTTP #{resp.code} fetching page data" unless (200..299).cover?(resp.code)
+
+      html = Nokogiri::HTML5::Document.parse(resp.body)
       pd = html.css('#pagedata').first
       [true, JSON.parse(pd.attributes["data-blob"].value)]
     rescue StandardError => e
