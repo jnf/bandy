@@ -30,9 +30,16 @@ class UnpackItems
         end
 
         zip_path = item[:local_path]
-        artist = item[:digital_item]["artist"]
-        title = item[:digital_item]["title"]
-        extract_dir = File.join(unpack_path, artist, title)
+        artist = safe_name(item[:digital_item]["artist"])
+        title = safe_name(item[:digital_item]["title"])
+        extract_dir = begin
+          album_dir(artist, title)
+        rescue UnsafeEntryError => e
+          # Not retryable: the same names resolve the same way every run
+          log.error("Refused #{item_key}: #{e.message}")
+          store[:items][item_key][:state] = :failed
+          next
+        end
 
         # Skip if already extracted
         if Dir.exist?(extract_dir) && !Dir.empty?(extract_dir)
@@ -118,6 +125,27 @@ class UnpackItems
   # drop empty, "." and ".." segments, which also strips a leading slash.
   def safe_relative_path(name)
     name.split(%r{[/\\]}).reject { |seg| seg.empty? || seg == '.' || seg == '..' }.join('/')
+  end
+
+  # Artist and title come from Bandcamp, and most odd ones are honest: a split
+  # release named "A / B", a band called "..". Rewrite each into one directory
+  # name: "/" becomes "-" (Bandcamp's own zip names do the same), the ends are
+  # trimmed, and a name that's only a dot reference or nothing becomes "_".
+  def safe_name(name)
+    rewritten = name.to_s.tr('/', '-').strip
+    ['', '.', '..'].include?(rewritten) ? '_' : rewritten
+  end
+
+  # The guarantee under safe_name: the album lands exactly two levels under
+  # unpack_path, artist then title, or the item is refused. Joined onto the
+  # absolute root so a leading "~" stays a name.
+  def album_dir(artist, title)
+    root = File.expand_path(unpack_path)
+    dir = File.expand_path(File.join(root, artist, title))
+    unless File.dirname(File.dirname(dir)) == root
+      raise UnsafeEntryError, "#{artist.inspect}/#{title.inspect} doesn't resolve to one artist and one album under #{root}"
+    end
+    dir
   end
 
   # The guarantee under safe_relative_path: whatever the name, the destination
