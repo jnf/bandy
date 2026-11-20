@@ -137,6 +137,17 @@ class TestUnpackItems < Minitest::Test
     end
   end
 
+  # A leading tilde in an entry name is a filename, not a home directory.
+  def test_tilde_entry_names_are_filenames
+    make_zip(item[:local_path], { "~intro.mp3" => "hello", "~/outro.mp3" => "bye" })
+    seed_store("a123" => item)
+    UnpackItems.new(store: @store).run
+
+    assert_equal :unpacked, stored_state("a123")
+    assert_equal "hello", File.read(File.join(expected_extract_dir, "~intro.mp3"))
+    assert_equal "bye", File.read(File.join(expected_extract_dir, "~", "outro.mp3"))
+  end
+
   # The containment check is the guarantee under the sanitizer: if the sanitizer ever
   # lets a traversal through, nothing is written and the item is parked as :failed.
   def test_containment_refuses_the_archive_if_the_sanitizer_fails
@@ -185,6 +196,96 @@ class TestUnpackItems < Minitest::Test
     seed_store("a123" => item(local_path: "/nonexistent/path.zip"))
     UnpackItems.new(store: @store).run
     assert_equal :downloaded, stored_state("a123")
+  end
+
+  # --- Artist and title become exactly one directory each ---
+  # They come from Bandcamp, and most odd ones are honest: a split release named
+  # "A / B", a band called "..". Rewrite them into one name each rather than
+  # reject them: "/" becomes "-" (Bandcamp's own zip names do this), the ends are
+  # trimmed, and a name that's only dots or nothing becomes "_".
+
+  def album_named(artist, title)
+    item(digital_item: { "artist" => artist, "title" => title, "download_type" => "a" })
+  end
+
+  def unpack_album(artist, title)
+    make_zip(item[:local_path])
+    seed_store("a123" => album_named(artist, title))
+    UnpackItems.new(store: @store).run
+    stored_item("a123")
+  end
+
+  # Every directory under UNPACK_PATH, relative to it.
+  def library_dirs
+    root = ENV['UNPACK_PATH']
+    Dir.glob("**/", File::FNM_DOTMATCH, base: root).map { |d| d.chomp('/') }
+       .reject { |d| d.empty? || d == '.' || d.end_with?('/.') }.sort
+  end
+
+  def test_slashes_in_artist_and_title_stay_one_level_each
+    result = unpack_album("Pat the Bunny / Ceschi", %q{Ceschi / Pat The Bunny split 12" and Zine (package 1)})
+
+    want = File.join(ENV['UNPACK_PATH'], "Pat the Bunny - Ceschi", %q{Ceschi - Pat The Bunny split 12" and Zine (package 1)})
+    assert_equal :unpacked, result[:state]
+    assert_equal want, result[:unpacked_path]
+    assert File.exist?(File.join(want, "track01.mp3"))
+    assert_equal ["Pat the Bunny - Ceschi", %q{Pat the Bunny - Ceschi/Ceschi - Pat The Bunny split 12" and Zine (package 1)}], library_dirs
+  end
+
+  def test_names_are_trimmed
+    result = unpack_album("  Envy ", " Split: Thursday / Envy ")
+    assert_equal File.join(ENV['UNPACK_PATH'], "Envy", "Split: Thursday - Envy"), result[:unpacked_path]
+  end
+
+  def test_dot_and_empty_names_become_underscore
+    result = unpack_album("..", " . ")
+    assert_equal File.join(ENV['UNPACK_PATH'], "_", "_"), result[:unpacked_path]
+    assert_equal ["_", "_/_"], library_dirs
+  end
+
+  def test_leading_dots_and_quotes_are_names_not_paths
+    result = unpack_album("RX Bandits", %q{...And The "Battle" Begun})
+    assert_equal File.join(ENV['UNPACK_PATH'], "RX Bandits", %q{...And The "Battle" Begun}), result[:unpacked_path]
+  end
+
+  # A leading tilde is a name, not a home directory.
+  def test_tilde_names_are_names
+    result = unpack_album("~Sorrow~", "~")
+    assert_equal File.join(ENV['UNPACK_PATH'], "~Sorrow~", "~"), result[:unpacked_path]
+  end
+
+  def test_slash_in_a_track_title_stays_one_file
+    src = File.join(@tmpdir, "song.mp3")
+    File.write(src, "song data")
+    seed_store("t123" => item(local_path: src,
+                              digital_item: { "artist" => "AC/DC", "title" => "Back/In Black", "download_type" => "t" }))
+    UnpackItems.new(store: @store).run
+
+    assert_equal "song data", File.read(File.join(ENV['UNPACK_PATH'], "AC-DC", "Back-In Black", "Back-In Black.mp3"))
+    assert_equal ["AC-DC", "AC-DC/Back-In Black"], library_dirs
+  end
+
+  # The guarantee under the rewrite: if it ever lets a separator or a dot name
+  # through, the item is refused and nothing is written.
+  def test_album_dir_is_refused_if_the_name_rewrite_fails
+    leaky = Class.new(UnpackItems) { def safe_name(name) = name }
+    make_zip(item[:local_path])
+    seed_store("a123" => album_named("..", "Test Album"))
+    leaky.new(store: @store).run
+
+    assert_equal :failed, stored_state("a123")
+    refute Dir.exist?(File.join(@tmpdir, "Test Album")), "the album escaped UNPACK_PATH"
+    assert_equal [], library_dirs
+  end
+
+  def test_nested_album_dir_is_refused_if_the_name_rewrite_fails
+    leaky = Class.new(UnpackItems) { def safe_name(name) = name }
+    make_zip(item[:local_path])
+    seed_store("a123" => album_named("Pat the Bunny / Ceschi", "Split"))
+    leaky.new(store: @store).run
+
+    assert_equal :failed, stored_state("a123")
+    assert_equal [], library_dirs
   end
 
   # --- Single-track downloads (download_type "t") share the album success path ---
