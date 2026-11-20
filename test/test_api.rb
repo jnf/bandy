@@ -128,9 +128,10 @@ class TestPageData < Minitest::Test
     "<html><body><div id=\"pagedata\" data-blob='#{blob.to_json}'></div></body></html>"
   end
 
-  def fake_response(body)
+  def fake_response(body, code: 200)
     obj = Object.new
     obj.define_singleton_method(:body) { body }
+    obj.define_singleton_method(:code) { code }
     obj
   end
 
@@ -151,6 +152,18 @@ class TestPageData < Minitest::Test
     happy, deets = pd.fetch
     refute happy
     assert_kind_of StandardError, deets
+  end
+
+  # A dead download link answers 404 with a page that still carries a #pagedata
+  # blob (page chrome, no items), so parsing alone would call it a success.
+  def test_http_404_returns_false_and_error
+    blob = { "templglobals" => {}, "languages" => [] }
+    client = FakeHTTP.new { |*| fake_response(pagedata_html(blob), code: 404) }
+    pd = API::PageData.new(path: "/download?sitem_id=1", http_client: client)
+
+    happy, deets = pd.fetch
+    refute happy
+    assert_match(/HTTP 404/, deets.message)
   end
 
   def test_uses_injected_path
