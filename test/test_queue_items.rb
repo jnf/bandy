@@ -48,6 +48,19 @@ class TestQueueItems < Minitest::Test
     obj
   end
 
+  # The error PageData itself returns for a 404, so these tests break if its
+  # message stops matching what queue_items looks for.
+  def page_not_found_error
+    resp = Object.new
+    resp.define_singleton_method(:code) { 404 }
+    resp.define_singleton_method(:body) { "<html></html>" }
+    client = Object.new
+    client.define_singleton_method(:get) { |*| resp }
+    happy, err = API::PageData.new(path: "/download", http_client: client).fetch
+    raise "expected PageData to fail on a 404" if happy
+    err
+  end
+
   def queue(resolver: fake_resolver({ digital_item: { "name" => "test" }, cdn_url: "https://cdn.example.com/dl" }))
     QueueItems.new(store: @store, resolver: resolver).run
   end
@@ -131,6 +144,42 @@ class TestQueueItems < Minitest::Test
     end
     out, _ = capture_io { QueueItems.new(debug: true, store: @store, resolver: resolver).run }
     assert_match(/Queue Items complete: 1 of 2 items queued/, out)
+  end
+
+  # A download page that 404s gets the same two strikes as an expired link: the
+  # first sends it back for a fresh redownload_url, the second needs a human.
+  def test_page_not_found_resets_to_seen_with_one_strike
+    seed_store({ "a123" => item })
+    queue(resolver: failing_resolver(page_not_found_error))
+
+    result = stored_item("a123")
+    assert_equal :seen, result[:state]
+    assert_equal 1, result[:expiration_count]
+  end
+
+  def test_second_page_not_found_marks_failed
+    seed_store({ "a123" => item(expiration_count: 1) })
+    queue(resolver: failing_resolver(page_not_found_error))
+
+    result = stored_item("a123")
+    assert_equal :failed, result[:state]
+    assert_match(/404/, result[:error_message])
+    assert_kind_of Integer, result[:failed_at]
+  end
+
+  def test_page_not_found_does_not_stop_the_run
+    seed_store({ "a1" => item, "a2" => item })
+    calls = 0
+    not_found = page_not_found_error
+    resolver = Object.new
+    resolver.define_singleton_method(:resolve) do |*|
+      calls += 1
+      raise not_found if calls == 1
+      { digital_item: { "name" => "test" }, cdn_url: "https://cdn.example.com/dl" }
+    end
+    queue(resolver: resolver)
+
+    assert_equal :queued, stored_item("a2")[:state]
   end
 
   def test_no_such_band_error_marks_failed

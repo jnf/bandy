@@ -46,18 +46,21 @@ class QueueItems
           log.info("Queued #{item_key} with CDN URL")
         rescue StandardError => e
           case e.message
-          when /ExpirationError/
+          # Both mean this redownload_url doesn't work. A fresh link from enrichment
+          # might; a second strike needs a human.
+          when /ExpirationError/, /HTTP 404/
+            what = e.message.match?(/HTTP 404/) ? "download page not found (404)" : "download expired"
             expirations = item.fetch(:expiration_count, 0) + 1
             if expirations >= MAX_EXPIRATIONS
-              log.error("#{item_key} download expired on Bandcamp even with a fresh URL, marking as :failed")
+              log.error("#{item_key} #{what} on Bandcamp even with a fresh URL, marking as :failed")
               store[:items][item_key].merge!({
                 state: :failed,
                 expiration_count: expirations,
-                error_message: "Download expired on Bandcamp even with a fresh URL (needs a human)",
+                error_message: "#{what.capitalize} on Bandcamp even with a fresh URL (needs a human)",
                 failed_at: Time.now.to_i
               })
             else
-              log.warn("#{item_key} redownload_url expired, resetting to :seen for re-enrichment")
+              log.warn("#{item_key} #{what}, resetting to :seen for re-enrichment")
               store[:items][item_key].merge!({ state: :seen, expiration_count: expirations })
             end
           when /NoSuchBandError/
