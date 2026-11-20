@@ -137,6 +137,17 @@ class TestUnpackItems < Minitest::Test
     end
   end
 
+  # A leading tilde in an entry name is a filename, not a home directory.
+  def test_tilde_entry_names_are_filenames
+    make_zip(item[:local_path], { "~intro.mp3" => "hello", "~/outro.mp3" => "bye" })
+    seed_store("a123" => item)
+    UnpackItems.new(store: @store).run
+
+    assert_equal :unpacked, stored_state("a123")
+    assert_equal "hello", File.read(File.join(expected_extract_dir, "~intro.mp3"))
+    assert_equal "bye", File.read(File.join(expected_extract_dir, "~", "outro.mp3"))
+  end
+
   # The containment check is the guarantee under the sanitizer: if the sanitizer ever
   # lets a traversal through, nothing is written and the item is parked as :failed.
   def test_containment_refuses_the_archive_if_the_sanitizer_fails

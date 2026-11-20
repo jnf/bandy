@@ -152,7 +152,7 @@ class UnpackItems
   # stays inside dir, or the whole archive is refused.
   def contained_path(dir, relative)
     root = File.expand_path(dir)
-    path = File.expand_path(relative, root)
+    path = File.expand_path(File.join(root, relative))
     unless path.start_with?(root + File::SEPARATOR)
       raise UnsafeEntryError, "#{relative.inspect} resolves outside #{root}"
     end
